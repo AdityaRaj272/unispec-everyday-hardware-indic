@@ -57,6 +57,26 @@ see **[results/SUMMARY.md](results/SUMMARY.md)** for every number.
 | ![](figures/fig1_hardware_fingerprint.png) | ![](figures/fig2_draft_size_sweep.png) |
 | ![](figures/fig3_wrong_g_cost.png) | ![](figures/fig4_calibration_methods.png) |
 | ![](figures/fig5_language.png) | ![](figures/fig6_thermal.png) |
+| ![](figures/fig7_copying_vs_speedup.png) | |
+
+### Findings so far (laptop CPU: Intel i7-8550U, fp32; T4 GPU to follow)
+
+* **Lossless:** 100% of speculative outputs identical to normal decoding.
+* **Hardware fingerprint:** on the CPU the *first* extra token is the expensive one — a 2-token pass
+  costs 1.55× a 1-token pass, after which each extra token adds only ~3–4%.
+* **Draft size:** average speedup rises to **1.62× at g = 8–16** and falls to 1.44× at g = 32; on the
+  least-copying articles g = 32 is **slower than no guessing (0.86–0.98×)**.
+* **Calibration:** UniSpec's fit (g\* = 14) and grid search (g\* = 12) deliver 1.53–1.54× on unseen
+  articles vs 1.58× for the best g in hindsight; the PPD split with the synthetic profile picks g = 22
+  (1.41×). All methods over-predict, because acceptance depends on how much each article is copied.
+* **Speedup follows copying:** per article, generation-only speedup grows from ~1.1× (20% of output
+  copied from the article) to ~3.4× (90%+).
+* **Languages:** Qwen's tokenizer needs 4.7–10.1 tokens per word for Hindi/Marathi/Bengali/Tamil vs 1.3
+  for English. Contrary to our hypothesis, acceptance per pass is *higher* (the 0.5B model copies the
+  article heavily, and each copied word is many tokens), giving 2.7–3.9× generation-only speedup — but
+  the 3–7× longer prompts dilute the end-to-end gain (Tamil 1.42× vs English 1.64×).
+* **Sustained load:** over 20 minutes of continuous load the plugged-in laptop showed no throttling
+  trend; the calibrated g kept its speedup (1.45–1.50× per cycle of prompts).
 
 ## Run it
 
