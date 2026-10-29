@@ -63,7 +63,7 @@ see **[results/SUMMARY.md](results/SUMMARY.md)** for every number.
 
 * **Lossless:** 100% of speculative outputs identical to normal decoding.
 * **Hardware fingerprint:** on the CPU the *first* extra token is the expensive one — a 2-token pass
-  costs 1.55× a 1-token pass, after which each extra token adds only ~3–4%.
+  costs 1.55× a 1-token pass, after which each extra token adds only ~4–5% of a 1-token pass.
 * **Draft size:** average speedup rises to **1.62× at g = 8–16** and falls to 1.44× at g = 32; on the
   least-copying articles g = 32 is **slower than no guessing (0.86–0.98×)**.
 * **Calibration:** UniSpec's fit (g\* = 14) and grid search (g\* = 12) deliver 1.53–1.54× on unseen
