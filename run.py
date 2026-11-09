@@ -5,6 +5,8 @@ One entry point for every experiment, on any device.
   python run.py thermal --minutes 20     # sustained-load stability run (laptops)
   python run.py profile calibrate --tag power-saver   # same device, another condition:
                                                       # re-profile only, tau re-used (~10 min)
+  python run.py profile sweep calibrate --tag wide-grid --grid 1 2 4 8 16 32 48 64 96 128
+                                         # draft sizes beyond the default 32 (GPUs)
   python run.py all --preset quick       # few-minute smoke test
   python run.py plots                    # figures + summary tables from everything in results/
 
@@ -35,6 +37,8 @@ def main():
     ap.add_argument("--preset", default="auto", help="auto | quick | cpu | gpu")
     ap.add_argument("--tag", default="", help="label for a condition, e.g. power-saver, on-battery")
     ap.add_argument("--minutes", type=float, default=None, help="duration of the thermal run")
+    ap.add_argument("--grid", type=int, nargs="+", default=None,
+                    help="draft sizes g for the sweep (default: the preset's grid, up to 32)")
     ap.add_argument("--extra-tokenizers", nargs="*", default=["sarvamai/sarvam-1"],
                     help="other tokenizers to compare tokens-per-word with (language step)")
     ap.add_argument("--results", default=os.path.join(HERE, "results"))
@@ -63,7 +67,13 @@ def run_model_steps(args, steps):
     info = describe(device, dtype)
     info["model"] = args.model
     info["preset"] = preset
-    name = device_id(info) + (f"__{args.tag}" if args.tag else "")
+    tag = args.tag
+    if info.get("on_battery") and not tag:
+        # battery power slows a laptop CPU down; never mix those timings with plugged-in ones
+        tag = "on-battery"
+        print("WARNING: this laptop is running on battery. Results are saved separately under the tag "
+              "'on-battery'. Plug in the charger and restart for the normal measurements.")
+    name = device_id(info) + (f"__{tag}" if tag else "")
     if preset == "quick":
         name += "__quick"
     out_dir = os.path.join(args.results, name)
@@ -76,6 +86,10 @@ def run_model_steps(args, steps):
     ctx = ex.Ctx(model=model, tok=tok, verifier=ex.TorchVerifier(model), eos=eos_ids_for(tok, model),
                  sync=sync_fn(device), info=info, out_dir=out_dir, cfg=dict(ex.PRESETS[preset]),
                  results_root=args.results)
+    if args.grid:
+        ctx.cfg["grid"] = sorted(set(args.grid))
+        # the hardware profile must cover passes of 1 + g tokens for the largest g
+        ctx.cfg["profile_n"] = sorted(set(ctx.cfg["profile_n"]) | {g + 1 for g in args.grid})
 
     for step in steps:
         if step != "thermal" and ctx.load(step if step != "calibrate" else "calibration") and not args.force:

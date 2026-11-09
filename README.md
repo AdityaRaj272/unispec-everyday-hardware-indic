@@ -59,22 +59,34 @@ see **[results/SUMMARY.md](results/SUMMARY.md)** for every number.
 | ![](figures/fig5_language.png) | ![](figures/fig6_thermal.png) |
 | ![](figures/fig7_copying_vs_speedup.png) | |
 
-### Findings so far (laptop CPU: Intel i7-8550U, fp32; T4 GPU to follow)
+### Findings so far (laptop CPU: Intel i7-8550U, fp32 · free GPU: Tesla T4, fp16)
 
-* **Lossless:** 100% of speculative outputs identical to normal decoding.
-* **Hardware fingerprint:** on the CPU the *first* extra token is the expensive one — a 2-token pass
-  costs 1.55× a 1-token pass, after which each extra token adds only ~4–5% of a 1-token pass.
-* **Draft size:** average speedup rises to **1.62× at g = 8–16** and falls to 1.44× at g = 32; on the
-  least-copying articles g = 32 is **slower than no guessing (0.86–0.98×)**.
-* **Calibration:** UniSpec's fit (g\* = 14) and grid search (g\* = 12) deliver 1.53–1.54× on unseen
-  articles vs 1.58× for the best g in hindsight; the PPD split with the synthetic profile picks g = 22
-  (1.41×). All methods over-predict, because acceptance depends on how much each article is copied.
-* **Speedup follows copying:** per article, generation-only speedup grows from ~1.1× (20% of output
-  copied from the article) to ~3.4× (90%+).
+* **Lossless:** 100% identical output on the CPU. On the T4, 100% in the correctness check and 90–97%
+  across the sweep; the rest diverge at fp16 near-ties between two almost equally likely tokens
+  (a rounding effect of half precision, not an error in the method).
+* **Hardware fingerprints are opposite:** on the T4 a pass costs ~25 ms for 1 token and ~29–30 ms for
+  anything from 2 to 33 tokens — checking guesses is almost free. On the CPU a 2-token pass already
+  costs 1.55× a 1-token pass and a 33-token pass 3.8×.
+* **τ really is device-independent:** on the 12 articles run on both devices, tokens gained per pass
+  agree to two decimals at every g (e.g. 2.60 vs 2.60 at g = 8) — the assumption behind both
+  UniSpec's calibration and PPD's "measure acceptance once" split.
+* **So the best draft size differs:** the CPU peaks at **1.62× around g = 8–16** and declines after
+  (1.44× at g = 32; on the least-copying articles g = 32 is slower than no guessing, 0.86–0.98×).
+  The T4 keeps improving up to the largest g tried, **3.17× at g = 32**.
+* **Cost of the wrong g (held-out articles):** the CPU running the T4's g = 32 gets 1.33× instead of
+  1.54× (−14%); the T4 running the CPU's g = 14 gets 2.22× instead of 2.36× (−6%).
+* **Calibration:** on the CPU, UniSpec's fit (g\* = 14) and grid search (g\* = 12) deliver 1.53–1.54×
+  on unseen articles; the PPD split with the quick synthetic profile picks g = 22 (1.41×), because the
+  CPU profile is noisy at small sizes. On the T4 all methods — including the PPD split using τ measured
+  on the *laptop* — pick g = 32. All methods over-predict the speedup, because acceptance depends on how
+  much each article is copied.
+* **Speedup follows copying:** per article, generation-only speedup grows steadily with the share of
+  the output copied from the article, on both devices (fig. 7).
 * **Languages:** Qwen's tokenizer needs 4.7–10.1 tokens per word for Hindi/Marathi/Bengali/Tamil vs 1.3
-  for English. Contrary to our hypothesis, acceptance per pass is *higher* (the 0.5B model copies the
-  article heavily, and each copied word is many tokens), giving 2.7–3.9× generation-only speedup — but
-  the 3–7× longer prompts dilute the end-to-end gain (Tamil 1.42× vs English 1.64×).
+  for English. Contrary to our hypothesis, tokens gained per pass are *higher* (the 0.5B model copies
+  the article heavily, and each copied word is many tokens). On the T4 this gives **5.6–8.6× end to
+  end** (Hindi 8.55×). On the CPU the 3–7× longer prompts take long to read, which guessing cannot speed
+  up, so end-to-end gains shrink to 1.42–1.90× although generation alone is 2.7–3.9× faster.
 * **Sustained load:** over 20 minutes of continuous load the plugged-in laptop showed no throttling
   trend; the calibrated g kept its speedup (1.45–1.50× per cycle of prompts).
 
@@ -96,7 +108,8 @@ python run.py plots                  # figures + results/SUMMARY.md
   (`--force` redoes them).
 * `python run.py all --preset quick` is a few-minute smoke test.
 * A different condition on the same machine (e.g. battery saver) gets its own folder:
-  `python run.py profile sweep calibrate --tag power-saver`.
+  `python run.py profile calibrate --tag power-saver` (re-profiles the hardware and re-uses the acceptance numbers already measured; a laptop on battery is detected and labelled `on-battery` automatically).
+* Larger draft sizes than the default 32: `python run.py profile sweep calibrate --tag wide-grid --grid 1 2 4 8 16 32 48 64 96 128`.
 * **Free T4 GPU:** open `notebooks/colab_t4.ipynb` in Google Colab with a T4 runtime and run all cells.
 * For timing quality, keep other heavy programs closed while it runs and keep a laptop plugged in
   (unless that is the condition being measured).

@@ -317,24 +317,30 @@ def calibrate(ctx: Ctx) -> Dict:
             ogs, [oc[g]["tau"] for g in ogs], [oc[g]["mean_pass_len"] for g in ogs], prof_curve)
 
     # Held-out check: measured speedup at each chosen g on the eval prompts.
-    ev = aggregate([r for r in rows if r["split"] == "eval"])
-    missing = sorted({ch["g_star"] for ch in choices.values()} - set(ev))
+    # If any chosen g is not in the sweep grid, ALL chosen g are re-measured
+    # together in one session, so no choice is compared against numbers taken
+    # under different machine conditions (e.g. another day, or on battery).
+    sweep_ev = aggregate([r for r in rows if r["split"] == "eval"])
+    chosen = sorted({ch["g_star"] for ch in choices.values()})
     extra_rows = []
-    if missing:
-        print(f"  measuring g={missing} on held-out prompts (not in the sweep grid)")
+    if set(chosen) - set(sweep_ev):
+        print(f"  measuring g={chosen} together on held-out prompts (some are not in the sweep grid)")
         prompts = load_prompts("english", "eval", ctx.cfg["n_eval"])
-        extra_rows = [r for r in run_paired(ctx, prompts, missing, ctx.cfg["repeats"], "extra") if r["g"] > 0]
-        ev = aggregate([r for r in rows + extra_rows if r["split"] == "eval"])
+        extra_rows = run_paired(ctx, prompts, chosen, ctx.cfg["repeats"], "held-out")
+        ev = aggregate(extra_rows)
+    else:
+        ev = sweep_ev
     for name, ch in choices.items():
         e = ev[ch["g_star"]]
         ch.update(heldout_speedup=e["speedup"], heldout_decode_speedup=e["decode_speedup"])
         print(f"  {name:40s} g*={ch['g_star']:3d}  predicted {ch['pred_speedup']:.2f}x  "
               f"held-out {e['speedup']:.2f}x (decode {e['decode_speedup']:.2f}x)")
-    best_eval = max((g for g in ev if g > 0), key=lambda g: ev[g]["speedup"])
+    best_eval = max((g for g in sweep_ev if g > 0), key=lambda g: sweep_ev[g]["speedup"])
     out = {"choices": choices, "typical_ctx": typical_ctx, "calib_agg": calib,
-           "eval_agg": ev, "eval_best_g": best_eval, "extra_rows": extra_rows,
-           "g_star": choices["unispec"]["g_star"]}
-    print(f"  best g on held-out prompts (hindsight): {best_eval} -> {ev[best_eval]['speedup']:.2f}x")
+           "eval_agg": ev, "sweep_eval_agg": sweep_ev, "eval_best_g": best_eval,
+           "extra_rows": extra_rows, "g_star": choices["unispec"]["g_star"]}
+    print(f"  best grid g on held-out prompts in the sweep (hindsight): {best_eval} -> "
+          f"{sweep_ev[best_eval]['speedup']:.2f}x")
     ctx.save("calibration", out)
     return out
 

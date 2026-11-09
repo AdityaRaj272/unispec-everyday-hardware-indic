@@ -113,10 +113,19 @@ def fig_sweep(data, colors, labels, out_dir):
     if not devs:
         return None
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.2))
-    for d in devs:
-        a = _agg(data[d]["sweep"]["rows"])
+    # tau is compared on the prompts every device ran, so the curves are like for like
+    common = set.intersection(*({r["prompt_id"] for r in data[d]["sweep"]["rows"]} for d in devs))
+    markers = ["o", "s", "^", "D", "v", "P", "X", "*"]
+    all_gs = set()
+    for k, d in enumerate(devs):
+        rows = data[d]["sweep"]["rows"]
+        a = _agg(rows)
         gs = [g for g in a if g > 0]
-        axes[0].plot(gs, [a[g]["tau"] for g in gs], marker="o", color=colors[d], label=labels[d])
+        all_gs |= set(gs)
+        c = _agg([r for r in rows if r["prompt_id"] in common])
+        cg = [g for g in c if g > 0]
+        axes[0].plot(cg, [c[g]["tau"] for g in cg], marker=markers[k % len(markers)], ms=7 - k,
+                     ls="-" if k == 0 else "--", color=colors[d], label=labels[d])
         axes[1].plot(gs, [a[g]["speedup"] for g in gs], marker="o", color=colors[d], label=labels[d])
         cal = data[d].get("calibration")
         if cal:
@@ -126,17 +135,20 @@ def fig_sweep(data, colors, labels, out_dir):
                          markeredgecolor=SURFACE, markeredgewidth=1.5, zorder=5)
             axes[1].annotate(f"g*={g}", (g, y), xytext=(0, 10), textcoords="offset points",
                              ha="center", fontsize=8, color=INK2)
-    axes[0].set(title="τ: tokens gained per model pass", xlabel="draft size g (tokens guessed)", ylabel="tokens per pass")
+    axes[0].set(title=f"τ: tokens gained per pass (same {len(common)} articles)",
+                xlabel="draft size g (tokens guessed)", ylabel="tokens per pass")
     axes[0].set_xscale("log", base=2)
+    _legend(axes[0], loc="upper left", fontsize=8)
     axes[1].axhline(1, color=INK2, lw=1, ls="--")
     axes[1].text(1, 1.0, " no guessing = 1.0×", color=INK2, fontsize=8, va="bottom")
     axes[1].set(title="Measured speedup over normal decoding", xlabel="draft size g (tokens guessed)",
                 ylabel="speedup (×)")
     axes[1].set_xscale("log", base=2)
+    ticks = [t for t in (1, 2, 4, 8, 16, 32, 64, 128) if t <= max(all_gs)]
     for ax in axes:
-        ax.set_xticks([1, 2, 4, 8, 16, 32])
-        ax.set_xticklabels(["1", "2", "4", "8", "16", "32"])
-    _legend(axes[1], loc="lower left")
+        ax.set_xticks(ticks)
+        ax.set_xticklabels([str(t) for t in ticks])
+    _legend(axes[1], loc="upper left", fontsize=8)
     fig.suptitle("Same guesses accepted everywhere (left), but the payoff depends on the device (right; ★ = calibrated g*)",
                  color=INK, fontsize=11, x=0.01, ha="left")
     fig.tight_layout()
@@ -151,20 +163,19 @@ def wrong_g_table(data, labels):
     gstars = {d: data[d]["calibration"]["g_star"] for d in devs}
     table = []
     for d in devs:
-        rows = data[d]["sweep"]["rows"] + data[d]["calibration"].get("extra_rows", [])
-        a = _agg(rows, "eval")
+        # every bar comes from the same sweep session (held-out prompts); a g
+        # between grid points is read off the curve by interpolation in log2(g)
+        a = _agg(data[d]["sweep"]["rows"], "eval")
         gs = sorted(g for g in a if g > 0)
 
         def at(g):
-            gg = min(gs, key=lambda x: abs(x - g))
-            return gg, a[gg]["speedup"]
+            return float(np.interp(np.log2(g), np.log2(gs), [a[x]["speedup"] for x in gs]))
 
-        entry = {"device": labels[d], "own_g": gstars[d], "own": at(gstars[d])[1],
+        entry = {"device": labels[d], "own_g": gstars[d], "own": at(gstars[d]),
                  "largest_g": gs[-1], "largest": a[gs[-1]]["speedup"], "others": {}}
         for o in devs:
             if o != d:
-                gg, s = at(gstars[o])
-                entry["others"][labels[o]] = {"g": gstars[o], "g_used": gg, "speedup": s}
+                entry["others"][labels[o]] = {"g": gstars[o], "speedup": at(gstars[o])}
         table.append(entry)
     return table
 
@@ -174,38 +185,38 @@ def fig_wrong_g(data, colors, labels, out_dir):
     table = wrong_g_table(data, labels)
     if not table:
         return None, table
-    cats = ["own calibrated g*"] + [f"g* of {o}" for o in labels if any(o in t["others"] for t in table)] \
-        + ["largest g tried"]
-    fig, ax = plt.subplots(figsize=(max(7, 2.4 * len(table) + 3), 4.4))
-    width = min(0.8 / len(cats), 0.22)
-    shades = ["#2a78d6", "#86b6ef", "#b7d3f6", "#cde2fb", "#9ec5f4"]
-    for j, cat in enumerate(cats):
-        xs, ys, gl = [], [], []
-        for i, t in enumerate(table):
-            if cat.startswith("own"):
-                v, g = t["own"], t["own_g"]
-            elif cat.startswith("largest"):
-                v, g = t["largest"], t["largest_g"]
-            else:
-                o = cat[len("g* of "):]
-                if o not in t["others"]:
-                    continue
-                v, g = t["others"][o]["speedup"], t["others"][o]["g"]
-            xs.append(i + (j - (len(cats) - 1) / 2) * width)
-            ys.append(v)
-            gl.append(g)
-        color = "#8c8a83" if cat.startswith("largest") else shades[min(j, len(shades) - 1)]
-        bars = ax.bar(xs, ys, width=width * 0.92, color=color, label=cat, edgecolor=SURFACE, linewidth=1)
-        for x, y, g in zip(xs, ys, gl):
-            ax.text(x, y + 0.01, f"{y:.2f}×\ng={g}", ha="center", va="bottom", fontsize=7.5, color=INK2)
+    # Per device: its own g*, then each other device's g*, then the largest g
+    # tried -- skipping any bar whose g is already shown for that device.
+    fig, ax = plt.subplots(figsize=(max(7, 2.6 * len(table) + 3), 4.4))
+    width = 0.22
+    style = {"own": ("#2a78d6", "own calibrated g*"), "other": ("#86b6ef", "another device's g*"),
+             "largest": ("#8c8a83", "largest g tried")}
+    used_labels = set()
+    for i, t in enumerate(table):
+        bars = [("own", t["own"], t["own_g"], "")]
+        for o, v in t["others"].items():
+            if v["g"] not in {b[2] for b in bars}:
+                bars.append(("other", v["speedup"], v["g"], f"\n({o.split(' (')[0]})"))
+        if t["largest_g"] not in {b[2] for b in bars}:
+            bars.append(("largest", t["largest"], t["largest_g"], ""))
+        for j, (kind, v, g, note) in enumerate(bars):
+            x = i + (j - (len(bars) - 1) / 2) * width
+            color, lab = style[kind]
+            ax.bar([x], [v], width=width * 0.92, color=color, edgecolor=SURFACE, linewidth=1,
+                   label=None if lab in used_labels else lab)
+            used_labels.add(lab)
+            ax.text(x, v + 0.02, f"{v:.2f}×\ng={g}", ha="center", va="bottom", fontsize=7.5, color=INK2)
     ax.axhline(1, color=INK, lw=1, ls="--")
     ax.set_xlim(-0.6, len(table) - 0.4)
     ax.set_xticks(range(len(table)))
     ax.set_xticklabels([t["device"] for t in table])
     ax.set(ylabel="speedup on held-out prompts (×)", title="Cost of using the wrong draft size")
-    ax.set_ylim(0, None)
+    ax.text(0.0, -0.13, "From each device's draft-size sweep; a g between tested values is interpolated.",
+            transform=ax.transAxes, fontsize=7.5, color=INK2)
+    ax.set_ylim(0, max(max(t["own"], t["largest"], *[v["speedup"] for v in t["others"].values()])
+                       for t in table) * 1.25)
     ax.grid(axis="x", visible=False)
-    _legend(ax, loc="upper right", fontsize=8)
+    _legend(ax, loc="upper left", fontsize=8)
     fig.tight_layout()
     return _save(fig, out_dir, "fig3_wrong_g_cost.png"), table
 
@@ -273,6 +284,7 @@ def fig_language(data, colors, labels, out_dir):
         axes[2].plot(x, dec, marker="o", color=colors[d], ls="--", label=f"{labels[d]}: generation only")
         axes[2].plot(x, spd, marker="o", color=colors[d], label=f"{labels[d]}: end to end")
     axes[1].set(title="τ: tokens gained per pass", ylabel="tokens per pass")
+    _legend(axes[1], loc="lower right", fontsize=7.5)
     axes[2].axhline(1, color=INK2, lw=1, ls=":")
     axes[2].set(title="Speedup at the device's g*", ylabel="speedup (×)")
     for ax in axes:
@@ -377,6 +389,16 @@ def summary_md(data, labels, table, out_path):
         for g, v in a.items():
             L.append(f"| {g} | {v['tau']:.2f} | {v['acceptance_rate']:.2f} | {v['mean_pass_sec'] * 1000:.1f} | "
                      f"{v['mean_pass_len']:.1f} | {v['speedup']:.2f}× | {v['decode_speedup']:.2f}× |")
+        L.append("")
+    sw = [d for d, exp in data.items() if "sweep" in exp]
+    if len(sw) > 1:
+        common = set.intersection(*({r["prompt_id"] for r in data[d]["sweep"]["rows"]} for d in sw))
+        aggs = {d: _agg([r for r in data[d]["sweep"]["rows"] if r["prompt_id"] in common]) for d in sw}
+        gs = sorted(set.intersection(*(set(a) for a in aggs.values())) - {0})
+        L += [f"## Is τ the same on every device? ({len(common)} articles run on all devices)", "",
+              "| g | " + " | ".join(f"τ on {labels[d]}" for d in sw) + " |", "|---|" + "---|" * len(sw)]
+        for g in gs:
+            L.append(f"| {g} | " + " | ".join(f"{aggs[d][g]['tau']:.2f}" for d in sw) + " |")
         L.append("")
     L += ["## Calibration (held-out prompts)", "", "| device | method | g* | predicted | measured |", "|---|---|---|---|---|"]
     for d, exp in data.items():
