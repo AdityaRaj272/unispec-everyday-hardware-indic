@@ -169,12 +169,14 @@ def wrong_g_table(data, labels):
         gs = sorted(g for g in a if g > 0)
 
         def at(g):
+            if g < gs[0] or g > gs[-1]:
+                return None                          # never measured this far on this device
             return float(np.interp(np.log2(g), np.log2(gs), [a[x]["speedup"] for x in gs]))
 
         entry = {"device": labels[d], "own_g": gstars[d], "own": at(gstars[d]),
                  "largest_g": gs[-1], "largest": a[gs[-1]]["speedup"], "others": {}}
         for o in devs:
-            if o != d:
+            if o != d and at(gstars[o]) is not None:
                 entry["others"][labels[o]] = {"g": gstars[o], "speedup": at(gstars[o])}
         table.append(entry)
     return table
@@ -189,7 +191,7 @@ def fig_wrong_g(data, colors, labels, out_dir):
     # tried -- skipping any bar whose g is already shown for that device.
     fig, ax = plt.subplots(figsize=(max(7, 2.6 * len(table) + 3), 4.4))
     width = 0.22
-    style = {"own": ("#2a78d6", "own calibrated g*"), "other": ("#86b6ef", "another device's g*"),
+    style = {"own": ("#2a78d6", "own calibrated g*"), "other": ("#86b6ef", "g* calibrated elsewhere"),
              "largest": ("#8c8a83", "largest g tried")}
     used_labels = set()
     for i, t in enumerate(table):

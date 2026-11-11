@@ -72,14 +72,19 @@ see **[results/SUMMARY.md](results/SUMMARY.md)** for every number.
   UniSpec's calibration and PPD's "measure acceptance once" split.
 * **So the best draft size differs:** the CPU peaks at **1.62× around g = 8–16** and declines after
   (1.44× at g = 32; on the least-copying articles g = 32 is slower than no guessing, 0.86–0.98×).
-  The T4 keeps improving up to the largest g tried, **3.17× at g = 32**.
+  The T4 keeps improving up to the largest g tried: 3.17× at g = 32 and, in a second sweep reaching
+  g = 128 (`__wide-grid`), **4.10× at g = 128** — a 129-token pass still takes ~28 ms. With a 0.5B
+  model the T4 never runs out of spare capacity in this range.
 * **Cost of the wrong g (held-out articles):** the CPU running the T4's g = 32 gets 1.33× instead of
   1.54× (−14%); the T4 running the CPU's g = 14 gets 2.22× instead of 2.36× (−6%).
 * **Calibration:** on the CPU, measured together on unseen articles in one session, UniSpec's fit
   (g\* = 14) gives 1.48×, grid search (g\* = 12) 1.47×, the PPD split with the quick synthetic profile
   (g\* = 22) 1.42×, and the PPD split using τ measured on the *T4* (g\* = 20) 1.38× — all within 10%,
   because the CPU's speedup curve is flat between g = 8 and 22. On the T4 all methods — including the
-  PPD split using τ measured on the *laptop* — pick g = 32. All methods over-predict the speedup,
+  PPD split using τ measured on the *laptop* — pick g = 32 (the top of that grid); in the wide sweep,
+  UniSpec's fit and grid search pick g = 128. The PPD split relies on one short synthetic timing
+  profile, and on the shared cloud GPU a few of its readings jump from ~28 to ~40 ms; with τ measured
+  on the laptop it then picks g = 7 (1.88× instead of 2.30×). All methods over-predict the speedup,
   because acceptance depends on how much each article is copied.
 * **Speedup follows copying:** per article, generation-only speedup grows steadily with the share of
   the output copied from the article, on both devices (fig. 7).
