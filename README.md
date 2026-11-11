@@ -75,11 +75,12 @@ see **[results/SUMMARY.md](results/SUMMARY.md)** for every number.
   The T4 keeps improving up to the largest g tried, **3.17× at g = 32**.
 * **Cost of the wrong g (held-out articles):** the CPU running the T4's g = 32 gets 1.33× instead of
   1.54× (−14%); the T4 running the CPU's g = 14 gets 2.22× instead of 2.36× (−6%).
-* **Calibration:** on the CPU, UniSpec's fit (g\* = 14) and grid search (g\* = 12) deliver 1.53–1.54×
-  on unseen articles; the PPD split with the quick synthetic profile picks g = 22 (1.41×), because the
-  CPU profile is noisy at small sizes. On the T4 all methods — including the PPD split using τ measured
-  on the *laptop* — pick g = 32. All methods over-predict the speedup, because acceptance depends on how
-  much each article is copied.
+* **Calibration:** on the CPU, measured together on unseen articles in one session, UniSpec's fit
+  (g\* = 14) gives 1.48×, grid search (g\* = 12) 1.47×, the PPD split with the quick synthetic profile
+  (g\* = 22) 1.42×, and the PPD split using τ measured on the *T4* (g\* = 20) 1.38× — all within 10%,
+  because the CPU's speedup curve is flat between g = 8 and 22. On the T4 all methods — including the
+  PPD split using τ measured on the *laptop* — pick g = 32. All methods over-predict the speedup,
+  because acceptance depends on how much each article is copied.
 * **Speedup follows copying:** per article, generation-only speedup grows steadily with the share of
   the output copied from the article, on both devices (fig. 7).
 * **Languages:** Qwen's tokenizer needs 4.7–10.1 tokens per word for Hindi/Marathi/Bengali/Tamil vs 1.3
