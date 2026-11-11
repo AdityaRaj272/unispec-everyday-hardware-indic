@@ -8,3 +8,4 @@ pyarrow>=14
 matplotlib>=3.7
 psutil>=5.9
 py-cpuinfo>=9.0
+reportlab>=4.0        # report/build_report.py only
