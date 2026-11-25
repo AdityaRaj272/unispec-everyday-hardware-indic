@@ -63,6 +63,10 @@ def _agg(rows: List[Dict], split=None) -> Dict[int, Dict]:
     return aggregate(rows, split)
 
 
+def _lang(lg: Dict, lang: str) -> Dict[int, Dict]:
+    return _agg([r for r in lg["rows"] if r["lang"] == lang])
+
+
 def _legend(ax, **kw):
     h, l = ax.get_legend_handles_labels()
     if len(h) >= 2:
@@ -141,7 +145,7 @@ def fig_sweep(data, colors, labels, out_dir):
     _legend(axes[0], loc="upper left", fontsize=8)
     axes[1].axhline(1, color=INK2, lw=1, ls="--")
     axes[1].text(1, 1.0, " no guessing = 1.0×", color=INK2, fontsize=8, va="bottom")
-    axes[1].set(title="Measured speedup over normal decoding", xlabel="draft size g (tokens guessed)",
+    axes[1].set(title="Measured speedup (total time, all articles)", xlabel="draft size g (tokens guessed)",
                 ylabel="speedup (×)")
     axes[1].set_xscale("log", base=2)
     ticks = [t for t in (1, 2, 4, 8, 16, 32, 64, 128) if t <= max(all_gs)]
@@ -238,7 +242,7 @@ def fig_calibration(data, colors, labels, out_dir):
         short = [s + ")" if "(τ from" in s else s for s in short]
         y = np.arange(len(names))
         pred = [ch[n]["pred_speedup"] for n in names]
-        meas = [ch[n]["heldout_speedup"] for n in names]
+        meas = [ch[n]["heldout_decode_speedup"] for n in names]
         ax.barh(y + 0.2, pred, 0.38, color="#86b6ef", label="predicted")
         ax.barh(y - 0.2, meas, 0.38, color="#2a78d6", label="measured (held-out)")
         for yi, p, m, n in zip(y, pred, meas, names):
@@ -253,7 +257,7 @@ def fig_calibration(data, colors, labels, out_dir):
         ax.grid(axis="y", visible=False)
     h, l = axes[0][0].get_legend_handles_labels()
     fig.legend(h, l, loc="lower center", ncol=2, bbox_to_anchor=(0.5, -0.06))
-    fig.suptitle("Three ways to choose g: what each predicted, and what it delivered on unseen prompts",
+    fig.suptitle("Three ways to choose g: predicted vs measured generation speedup on unseen articles",
                  color=INK, fontsize=11, x=0.01, ha="left")
     fig.tight_layout()
     return _save(fig, out_dir, "fig4_calibration_methods.png")
@@ -278,17 +282,17 @@ def fig_language(data, colors, labels, out_dir):
     _legend(axes[0], loc="upper left", fontsize=8)
     for d in devs:
         lg = data[d]["language"]
-        g = data[d].get("calibration", {}).get("g_star") or max(lg["grid"])
-        acc = [lg["summary"][l][str(g)]["tau"] for l in LANG_ORDER]
-        spd = [lg["summary"][l][str(g)]["speedup"] for l in LANG_ORDER]
-        dec = [lg["summary"][l][str(g)]["decode_speedup"] for l in LANG_ORDER]
+        g = max(lg["grid"])
+        acc = [_lang(lg, l)[g]["tau"] for l in LANG_ORDER]
+        spd = [_lang(lg, l)[g]["speedup"] for l in LANG_ORDER]
+        dec = [_lang(lg, l)[g]["decode_speedup"] for l in LANG_ORDER]
         axes[1].plot(x, acc, marker="o", color=colors[d], label=f"{labels[d]}, g={g}")
         axes[2].plot(x, dec, marker="o", color=colors[d], ls="--", label=f"{labels[d]}: generation only")
         axes[2].plot(x, spd, marker="o", color=colors[d], label=f"{labels[d]}: end to end")
     axes[1].set(title="τ: tokens gained per pass", ylabel="tokens per pass")
     _legend(axes[1], loc="lower right", fontsize=7.5)
     axes[2].axhline(1, color=INK2, lw=1, ls=":")
-    axes[2].set(title="Speedup at the device's g*", ylabel="speedup (×)")
+    axes[2].set(title="Speedup at the draft size shown", ylabel="speedup (×)")
     for ax in axes:
         ax.set_xticks(x)
         ax.set_xticklabels([l.capitalize() for l in LANG_ORDER])
@@ -363,7 +367,7 @@ def fig_copy(data, colors, labels, out_dir, g=8):
         ax.set(title=labels[d], xlabel="% of the output's 4-token sequences copied from the article",
                ylabel=f"generation-only speedup at g={g} (×)")
         _legend(ax, loc="upper left", fontsize=8)
-    fig.suptitle("Guessing pays off exactly as much as the output copies its input (one dot per article)",
+    fig.suptitle("The more an answer copies its input, the more guessing pays off (one dot per article)",
                  color=INK, fontsize=11, x=0.01, ha="left")
     fig.tight_layout()
     return _save(fig, out_dir, "fig7_copying_vs_speedup.png")
@@ -386,11 +390,12 @@ def summary_md(data, labels, table, out_path):
         if "sweep" not in exp:
             continue
         a = _agg(exp["sweep"]["rows"])
-        L += [f"**{labels[d]}**", "", "| g | τ (tokens/pass) | acceptance | pass time (ms) | tokens/pass | speedup | decode-only speedup |",
-              "|---|---|---|---|---|---|---|"]
+        L += [f"**{labels[d]}**", "", "| g | τ (tokens/pass) | acceptance | pass time (ms) | tokens/pass | speedup (total time) | decode-only speedup | per-article mean | median | max |",
+              "|---|---|---|---|---|---|---|---|---|---|"]
         for g, v in a.items():
             L.append(f"| {g} | {v['tau']:.2f} | {v['acceptance_rate']:.2f} | {v['mean_pass_sec'] * 1000:.1f} | "
-                     f"{v['mean_pass_len']:.1f} | {v['speedup']:.2f}× | {v['decode_speedup']:.2f}× |")
+                     f"{v['mean_pass_len']:.1f} | {v['speedup']:.2f}× | {v['decode_speedup']:.2f}× | {v['speedup_mean']:.2f}× | "
+                     f"{v['speedup_median']:.2f}× | {v['speedup_max']:.1f}× |")
         L.append("")
     sw = [d for d, exp in data.items() if "sweep" in exp]
     if len(sw) > 1:
@@ -402,11 +407,11 @@ def summary_md(data, labels, table, out_path):
         for g in gs:
             L.append(f"| {g} | " + " | ".join(f"{aggs[d][g]['tau']:.2f}" for d in sw) + " |")
         L.append("")
-    L += ["## Calibration (held-out prompts)", "", "| device | method | g* | predicted | measured |", "|---|---|---|---|---|"]
+    L += ["## Calibration (held-out prompts)", "", "| device | method | g* | predicted (generation only) | measured (generation only) |", "|---|---|---|---|---|"]
     for d, exp in data.items():
         if "calibration" in exp:
             for n, c in exp["calibration"]["choices"].items():
-                L.append(f"| {labels[d]} | {n} | {c['g_star']} | {c['pred_speedup']:.2f}× | {c['heldout_speedup']:.2f}× |")
+                L.append(f"| {labels[d]} | {n} | {c['g_star']} | {c['pred_speedup']:.2f}× | {c['heldout_decode_speedup']:.2f}× |")
     if table:
         L += ["", "## Cost of the wrong draft size", "", "| device | own g* | other device's g* | largest g |", "|---|---|---|---|"]
         for t in table:
@@ -416,13 +421,13 @@ def summary_md(data, labels, table, out_path):
         if "language" not in exp:
             continue
         lg = exp["language"]
-        g = exp.get("calibration", {}).get("g_star") or max(lg["grid"])
+        g = max(lg["grid"])
         L += ["", f"## Languages — {labels[d]} (g = {g})", "",
               "| language | prompt tokens | " + " | ".join(f"tokens/word ({k.split('/')[-1]})" for k in lg["fertility"]) +
               " | τ | acceptance | 4-grams copied from article | 4-grams repeating own output | speedup | generation-only speedup |",
               "|---|---|" + "---|" * len(lg["fertility"]) + "---|---|---|---|---|---|"]
         for l in LANG_ORDER:
-            s = lg["summary"][l][str(g)]
+            s = _lang(lg, l)[g]
             fert = " | ".join(f"{f[l]['tokens_per_word']:.2f}" for f in lg["fertility"].values())
             L.append(f"| {l.capitalize()} | {lg['summary'][l]['prompt_tokens']:.0f} | {fert} | {s['tau']:.2f} | "
                      f"{s['acceptance_rate']:.2f} | {s.get('copy_from_prompt', float('nan')):.0%} | "

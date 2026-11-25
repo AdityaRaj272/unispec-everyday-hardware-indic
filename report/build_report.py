@@ -282,6 +282,19 @@ def write_tex(results_root: str, out_tex: str):
     gpu_lang = {x_["lang"]: x_ for x_ in lang_by_run.get(gpu.folder, [])}
     ind = rd.LANG_ORDER[1:]
     n_dev = len(mains)
+    wcpu = next(t for t in wrong if t["device"] == cpu.label)
+    cpu_foreign = wcpu["others"][gpu.label]
+    cpu_loss = pct(1 - cpu_foreign["speedup"] / wcpu["own"])
+    cpu_loss_max = pct(1 - wcpu["largest"] / wcpu["own"])
+    gpu_losses = [1 - v["speedup"] / t["own"] for t in wrong if t["device"] != cpu.label
+                  for o, v in t["others"].items() if o == cpu.label]
+    uni = {r.folder: r.exp["calibration"]["choices"]["unispec"] for r in runs if r.has("calibration")}
+    u_cpu = uni[cpu.folder]
+    gpu_over = [uni[r.folder]["pred_speedup"] / uni[r.folder]["heldout_decode_speedup"] - 1
+                for r in (gpu, gpu_best)]
+    top_g = max(gpu_best.sweep)
+    top_row = gpu_best.sweep[top_g]
+    gpu12 = gpu.sweep[12]["speedup"]
     dev_list = ", ".join(r.label for r in mains[:-1]) + (" and " if n_dev > 1 else "") + mains[-1].label
 
     R = Report()
@@ -300,16 +313,21 @@ def write_tex(results_root: str, out_tex: str):
         f"methods, UniSpec {cite('unispec')} and Hardware-Aware Parallel Prompt Decoding (PPD) {cite('ppd')}, "
         "choose how many tokens to draft with the same hardware-aware rule: maximise tokens accepted per pass, "
         "$\\tau(g)$, divided by the pass time, $s(g)$, measured on the target device. Both evaluate this rule only "
-        "on data-centre and workstation GPUs and name weak or unstable hardware and morphologically rich languages "
+        "on high-end NVIDIA GPUs; between them they name limited compute, unstable hardware and morphologically "
+        "rich languages "
         f"as open gaps. We test the rule on {dev_list}, using a training-free n-gram drafter, "
         "Qwen2.5-0.5B-Instruct and news summarisation in English, Hindi, Marathi, Bengali and Tamil. Acceptance "
         f"is device-independent: on articles run on every device, τ agrees within {tau_gap:.2f}. Pass time is not: "
         f"checking 32 extra tokens costs {gpu_ratio33:.2f} times a one-token pass on the {gpu.short} but "
-        f"{cpu_ratio33:.1f} times on the {cpu.short}. The best draft size is therefore {cpu_bg} on the CPU "
-        f"({x(cpu_peak)}) and {gpu_bg} or more on the GPU ({x(gpu_peak)}). Using a draft size calibrated on "
-        "another device loses 6–14%, and on articles that copy little from their source a large draft size is "
-        "slower than normal decoding. UniSpec-style calibration and grid search pick good draft sizes but "
-        "over-predict the gain, because the speedup is governed by how much the output copies its input. Qwen's "
+        f"{cpu_ratio33:.1f} times on the {cpu.short}. The CPU is therefore fastest at a draft size of {cpu_bg} "
+        f"({x(cpu_peak)} by total time) and falls off beyond it, while the GPU reaches {x(gpu12)} at 12 and then "
+        f"stays flat up to {top_g}: larger drafts bring it almost nothing but also cost it nothing. A draft size "
+        f"calibrated on the GPU makes the CPU {cpu_loss} slower than its own, the largest one tested {cpu_loss_max} "
+        "slower, and on articles that copy little it is slower than normal decoding. UniSpec-style calibration finds "
+        f"the CPU's best tested draft size and predicts its generation speedup closely ({x(u_cpu['pred_speedup'])} "
+        f"against {x(u_cpu['heldout_decode_speedup'])} measured on held-out articles); on the GPU it over-predicts by "
+        f"{pct(min(gpu_over))}–{pct(max(gpu_over))}, because the gain depends on how much the output copies its "
+        "input. Qwen's "
         f"tokenizer splits the Indian languages into {min(ind_fert):.1f}–{max(ind_fert):.1f} tokens per word "
         f"against {en_fert:.2f} for English; this raises acceptance, giving up to "
         f"{x(max(gpu_lang[l]['e2e'] for l in ind))} end to end on the GPU, but makes prompts so long that reading "
@@ -334,8 +352,9 @@ def write_tex(results_root: str, out_tex: str):
     R.p("How many tokens to draft is a hardware question. More drafted tokens raise the number accepted per pass but "
         "also lengthen each pass, by an amount that depends on the device. UniSpec "
         f"{cite('unispec')} and PPD {cite('ppd')} resolve this the same way: measure the device and choose the draft "
-        "size that maximises accepted tokens per unit time. Both papers evaluate only on NVIDIA data-centre and "
-        "workstation GPUs, and both list weak, unstable or shared hardware and morphologically rich languages "
+        "size that maximises accepted tokens per unit time. Both papers evaluate only on high-end NVIDIA GPUs, from "
+        "data-centre cards to the RTX 3090 and 4090. UniSpec lists unstable or shared hardware and languages with "
+        "richer morphology among its limitations; PPD lists GPUs with limited compute "
         "among their limitations.")
     R.p("This project tests the shared rule where the papers did not: on an ordinary laptop processor and a free "
         "cloud GPU, under sustained load, and in four Indian languages. It continues our proposal and mid-project "
@@ -464,9 +483,10 @@ def write_tex(results_root: str, out_tex: str):
         "different device, and reads the pass time from the device's synthetic latency profile $s(n)$, a pass over "
         "$n$ new tokens, by interpolation:")
     R.equation(r"\mathrm{speedup}_{\mathrm{PPD}}(g)=\frac{\tau(g)\,s(1)}{s\bigl(k_{\mathrm{avg}}(g)\bigr)}")
-    R.p("Each chosen $g$ is then measured on held-out articles. When any chosen $g$ lies between the sweep's grid "
-        "points, all chosen values are re-measured together in one session, so that no method is compared against "
-        "numbers taken under different machine conditions.")
+    R.p("Each chosen $g$ is checked on held-out articles by reading the measured speedup off the same device's "
+        "draft-size sweep, interpolating in $\\log_2 g$ between tested sizes, so that no method is compared against "
+        "numbers taken under different machine conditions. The formulas describe the decode phase, so predictions "
+        "are compared with generation-only speedup.")
     R.h2("Model, data and protocol")
     R.bullets([
         f"<b>Model.</b> Qwen2.5-0.5B-Instruct {cite('qwen')}, scaled-dot-product attention, batch size 1. It is "
@@ -477,9 +497,9 @@ def write_tex(results_root: str, out_tex: str):
         "<b>Task.</b> Summarise the article in 4–5 sentences in its own language. A system message keeps the small "
         "model from answering Indian-language articles in English. Summarisation is grounded: the output can reuse "
         "input phrases, which an n-gram drafter needs.",
-        "<b>Decoding.</b> Greedy, 128 new tokens. After warm-up, every article is decoded with the baseline and "
-        "with every draft size back to back, in a shuffled order, and speedups are computed per article and then "
-        "averaged. Pairing makes slow drifts in machine state affect all methods equally.",
+        "<b>Decoding.</b> Greedy, 128 new tokens. After warm-up, every article is decoded with the baseline and then, "
+        "back to back, with every draft size in a shuffled order, so that slow drifts in machine state affect all "
+        "methods similarly.",
     ])
     R.p("The prompt, identical for every language apart from the language name, is:")
     R.code("system: You are a helpful assistant. Always answer in {Language} only.\n"
@@ -502,8 +522,10 @@ def write_tex(results_root: str, out_tex: str):
             widths=[2.8, 3.3, 1.7, 2.1, 1.6, 1.5, 2.2])
     R.h2("Metrics and experiments")
     R.p("<b>Correctness</b> is the share of runs whose token ids equal greedy decoding exactly. <b>$\\tau$</b> is "
-        "generated tokens after the first divided by decode passes. <b>Speedup</b> is baseline latency over "
-        "speculative latency for the same article; <i>end to end</i> includes reading the prompt (prefill), "
+        "generated tokens after the first divided by decode passes. <b>Speedup</b> is total "
+        "baseline time over total speculative time across articles, and $\\tau$ is likewise total tokens over total "
+        "passes, as in Equation 1. Averaging per-article ratios instead would let a single article that is copied "
+        "word for word dominate, so per-article averages are given only in Appendix A; <i>end to end</i> includes reading the prompt (prefill), "
         "<i>generation-only</i> excludes it, since speculation cannot accelerate prefill. <b>Copy share</b> is the "
         "fraction of the summary's 4-token sequences that also occur in the article; <b>self-repeat</b> is the "
         "fraction that occurred earlier in the summary itself. <b>Tokens per word</b> is tokenizer pieces per "
@@ -584,20 +606,23 @@ def write_tex(results_root: str, out_tex: str):
         sp_rows.append([r.label] + [(f"<b>{x(r.sweep[g]['speedup'])}</b>" if g == best else x(r.sweep[g]["speedup"]))
                                     if g in r.sweep else "–" for g in show_g])
     R.table(["Run"] + [f"$g$ = {g}" for g in show_g], sp_rows,
-            "Mean end-to-end speedup over normal decoding by draft size, all articles. Bold: the best draft size of "
+            "End-to-end speedup over normal decoding by draft size (total time, all articles). Bold: the best tested size of "
             "each run.", widths=[3.4] + [12.6 / len(show_g)] * len(show_g))
     best_sent = []
     for r in swept:
         g, v = rd.best_g(r)
-        top = max(g2 for g2 in r.sweep)
-        best_sent.append(f"the {r.label} peaks at $g$ = {g} ({x(v)})" + (", the largest size tried" if g == top else ""))
-    R.p("Because $\\tau$ is shared and $s(g)$ is not, the devices want very different draft sizes (Table 4, "
-        "Figure 2): " + "; ".join(best_sent) + ". "
-        f"On the CPU the speedup falls to {x(cpu_g32)} at $g$ = 32, and for the "
-        f"{len(slow32)} articles that copied least from their source $g$ = 32 was slower than normal decoding "
-        f"({', '.join(x(v) for v in slow32)}). On the {gpu.short} the curve is still rising at the largest draft "
-        "size tested: with a 0.5B model the GPU never runs out of spare capacity in this range, so its true optimum "
-        "may be higher still.")
+        best_sent.append(f"{r.label}: $g$ = {g} ({x(v)})")
+    R.p("Because $\\tau$ is shared and $s(g)$ is not, the devices respond very differently to the draft size (Table 4, "
+        "Figure 2). The best tested sizes are " + "; ".join(best_sent) + ". "
+        f"On the CPU the curve has a clear peak and falls to {x(cpu_g32)} at $g$ = 32, where {len(slow32)} of the "
+        f"{cpu.sweep[32]['n']} articles were slower than normal decoding ({', '.join(x(v) for v in slow32)}). On the "
+        f"{gpu.short} the curve rises to {x(gpu12)} at $g$ = 12 and is then flat within measurement noise up to "
+        f"$g$ = {top_g} ({x(top_row['speedup'])}), so its exact optimum is not well determined: acceptance saturates "
+        "near $\\tau$ = 2.4 while a pass costs almost the same.")
+    R.p(f"Averages of per-article speedups tell a misleading story here. At $g$ = {top_g} on the {gpu.short} their mean "
+        f"is {x(top_row['speedup_mean'])}, but their median is {x(top_row['speedup_median'])}, because one article whose "
+        f"summary copies the source word for word runs {top_row['speedup_max']:.1f}× faster. Total time, which is what "
+        "Equation 1 describes, is not distorted in this way.")
     R.figure("fig2_draft_size_sweep.png",
              "Left: $\\tau$ on the articles run on every device; the curves coincide. Right: measured end-to-end "
              "speedup by draft size; stars mark each run's calibrated $g^*$. The dashed line is normal decoding.")
@@ -610,10 +635,12 @@ def write_tex(results_root: str, out_tex: str):
             "Speedup on held-out articles with each run's own calibrated $g^*$ and with a $g^*$ calibrated in "
             "another run, read from the run's own sweep (interpolated between tested draft sizes; draft sizes "
             "beyond a run's tested range are omitted).", widths=[3.6, 1.5, 1.6, 5.2, 1.6, 1.3])
-    R.p("Using a draft size calibrated elsewhere costs speed on every run (Table 5, Figure 3). The CPU loses most, "
-        "because the GPU's large draft size sits on the steep part of the CPU's cost curve; the GPU loses less "
-        "because a small draft size only forgoes acceptance it could have had for free. Averaged over articles no "
-        "run fell below 1.0× with a foreign draft size, but individual articles did on the CPU, as noted above.")
+    R.p(f"A mis-tuned draft size matters on the CPU and hardly at all on the GPU (Table 5, Figure 3). The CPU loses "
+        f"{cpu_loss} with the draft size calibrated on the {gpu.short} ($g$ = {cpu_foreign['g']}) and {cpu_loss_max} with "
+        f"the largest size tested ($g$ = {wcpu['largest_g']}), because it pays for every extra token. The GPU loses "
+        f"{pct(min(gpu_losses))}–{pct(max(gpu_losses))} with the CPU's smaller size, since it only forgoes a little "
+        "acceptance it could have had for free. No run fell below 1.0× overall, but individual articles did on the "
+        "CPU, as noted above.")
     R.figure("fig3_wrong_g_cost.png",
              "Cost of using the wrong draft size: held-out speedup with each run's own $g^*$ (dark) and with $g^*$ "
              "calibrated in another run (light).", width=0.9)
@@ -626,27 +653,28 @@ def write_tex(results_root: str, out_tex: str):
         for k, ch in r.exp["calibration"]["choices"].items():
             pred = ch.get("pred_speedup")
             cal_rows.append([r.label, rd.method_name(k, runs), ch["g_star"],
-                             x(pred) if pred == pred and pred is not None else "–", x(ch["heldout_speedup"])])
-    R.table(["Run", "Method", "$g^*$", "Predicted", "Measured (held-out)"], cal_rows,
-            "Draft size chosen by each method, the speedup it predicted from the calibration articles, and the "
-            "speedup measured on held-out articles.", widths=[3.8, 5.8, 1.1, 1.9, 3.2])
+                             x(pred) if pred == pred and pred is not None else "–",
+                             x(ch["heldout_decode_speedup"]), x(ch["heldout_speedup"])])
+    R.table(["Run", "Method", "$g^*$", "Predicted", "Measured", "End to end"], cal_rows,
+            "Draft size chosen by each method, the generation-only speedup it predicted from the calibration articles, "
+            "the generation-only speedup measured on held-out articles, and the end-to-end speedup there.",
+            widths=[3.6, 5.6, 1.0, 1.8, 1.8, 2.0])
     cal_cpu = cpu.exp["calibration"]["choices"]
-    R.p(f"On the {cpu.label}, measured together in one session on held-out articles, the methods chose $g$ between "
-        f"{min(c['g_star'] for c in cal_cpu.values())} and {max(c['g_star'] for c in cal_cpu.values())} and "
-        f"delivered {x(min(c['heldout_speedup'] for c in cal_cpu.values()))}–"
-        f"{x(max(c['heldout_speedup'] for c in cal_cpu.values()))}, within about 10% of each other, because the "
-        f"CPU's speedup curve is nearly flat around its optimum (Table 6, Figure 4). On the {gpu.short}, every method "
-        "in the first sweep, including the PPD split using $\\tau$ measured on the CPU, chose the largest draft size "
-        "tested, and in the extended sweep UniSpec's fit and grid search again chose the largest size.")
-    R.p("Two effects stand out. First, every method over-predicts the speedup, by 14% for grid search on the CPU and "
-        "by up to 2.7 times for the UniSpec fit on the extended GPU sweep. Section 5.5 shows why: the speedup depends "
-        "strongly on how much each article is copied, and the calibration articles happened to copy more than the "
-        "held-out ones. Second, the PPD split relies on one short synthetic latency profile. On the shared cloud GPU "
-        "a few profile readings jumped from about 28 to 40 ms; combined with $\\tau$ from the CPU, whose sweep "
-        "stopped at $g$ = 32, the split then chose $g$ = 7 and lost about 18% against the fit. Methods that time "
-        "real decoding were not affected.")
+    R.p(f"On the {cpu.label}, UniSpec's fit and grid search both choose the best tested size, $g$ = {u_cpu['g_star']}, and "
+        f"the fit predicts its generation speedup almost exactly: {x(u_cpu['pred_speedup'])} against "
+        f"{x(u_cpu['heldout_decode_speedup'])} measured (Table 6, Figure 4). The PPD split, including with $\\tau$ taken "
+        f"from the GPU, chooses $g$ between {min(c['g_star'] for k, c in cal_cpu.items() if k.startswith('ppd'))} and "
+        f"{max(c['g_star'] for k, c in cal_cpu.items() if k.startswith('ppd'))} and stays within 3% of the best, although "
+        "its synthetic profile makes it under-predict the speedup.")
+    R.p(f"On the {gpu.short} the methods choose sizes from 7 to 128 depending "
+        "on the sweep, which is what a flat curve implies: all of them deliver between 1.84× and 1.95× end to end. The fit "
+        f"over-predicts there, by {pct(min(gpu_over))}–{pct(max(gpu_over))}, because the GPU's calibration articles "
+        "copied clearly more than its held-out ones (Section 5.5). In the extended GPU run the PPD split chooses 7 or 8 "
+        "because several readings of its short latency profile are 38–47 ms instead of about 28 ms, probably "
+        "interference on the shared machine; on this flat curve that costs little, but it shows how sensitive a "
+        "profile-only method is to noise.")
     R.figure("fig4_calibration_methods.png",
-             "Calibration methods per run: speedup predicted from the calibration articles (light) and measured on "
+             "Calibration methods per run: generation-only speedup predicted from the calibration articles (light) and measured on "
              "held-out articles (dark), with the chosen $g^*$.")
 
     R.h2("Copying drives the speedup")
@@ -655,14 +683,15 @@ def write_tex(results_root: str, out_tex: str):
         c, n = rd.copy_correlation(r)
         if c is not None:
             corr_sent.append(f"$r$ = {c:.2f} over {n} articles on the {r.label}")
-    sc = rd.split_copy(cpu)
+    sc, sg = rd.split_copy(cpu), rd.split_copy(gpu)
     R.p("Across articles the speedup varies widely, and the share of the summary copied from the article explains "
         "most of that variation (Figure 5). At $g$ = 8 the Pearson correlation between copy share and "
         "generation-only speedup is " + "; ".join(corr_sent) + ". On the CPU, English summaries that copy about 20% "
-        "of their 4-token sequences run about 1.1× faster, while those that copy 90% run about 3.4× faster. The "
-        f"calibration articles copied {pct(sc['calib'])} on average and the held-out articles {pct(sc['eval'])}, "
-        "consistent with the over-prediction in Section 5.4. For a retrieval drafter, the task decides how much "
-        "can be gained and the hardware decides how large $g$ can usefully be.")
+        "of their 4-token sequences run about 1.1× faster, while the one that copies 91% runs about 3.4× faster. This "
+        f"also explains the calibration results: on the CPU the calibration and held-out articles copied similarly "
+        f"({pct(sc['calib'])} and {pct(sc['eval'])}) and the prediction was accurate, while on the GPU they differed "
+        f"({pct(sg['calib'])} and {pct(sg['eval'])}) and it was too high. For a retrieval drafter, the task decides how "
+        "much can be gained and the hardware decides how large $g$ can usefully be.")
     R.figure("fig7_copying_vs_speedup.png",
              "Generation-only speedup at $g$ = 8 against the share of the summary's 4-token sequences that also "
              "occur in the article; one point per article, marker shape by language.")
@@ -688,7 +717,7 @@ def write_tex(results_root: str, out_tex: str):
                               pct(row["rep"]), f"{row['tau']:.2f}", x(row["gen"]), x(row["e2e"]),
                               f"{row['prefill']:.2f}"])
     R.table(["Run", "Language", "Copied", "Repeated", "$\\tau$", "Generation only", "End to end", "Prefill (s)"],
-            lang_rows, "Language study on held-out articles at each device's calibrated draft size. Copied and "
+            lang_rows, "Language study on held-out articles (total time), at the largest draft size run on each device. Copied and "
             "repeated: share of the summary's 4-token sequences found in the article and earlier in the summary. "
             "Prefill is the time normal decoding spends reading the prompt.",
             widths=[3.0, 1.8, 1.5, 1.8, 1.1, 2.3, 1.9, 1.7])
@@ -714,8 +743,8 @@ def write_tex(results_root: str, out_tex: str):
         "so this does not affect the speed comparison, but a larger model that paraphrases more would likely accept "
         "fewer drafted tokens.")
     R.figure("fig5_language.png",
-             "Languages. Left: tokens per word for two tokenizers. Middle: $\\tau$ at each device's calibrated draft "
-             "size. Right: speedup at that draft size, end to end (solid) and generation only (dashed).")
+             "Languages. Left: tokens per word for two tokenizers. Middle: $\\tau$ at the draft size used on each "
+             "device. Right: speedup at that draft size, end to end (solid) and generation only (dashed).")
 
     R.h2("Sustained load")
     for r in mains:
@@ -729,17 +758,21 @@ def write_tex(results_root: str, out_tex: str):
                 f"Sustained load on the {r.label}: each cycle covers every held-out article once, so article content "
                 "averages out.", widths=[1.3, 2.0, 2.6, 2.7, 3.4, 3.0])
         R.p(f"Over {cyc[-1]['t1']:.0f} minutes of continuous work on the plugged-in {r.label}, pass times and the "
-            f"speedup at the calibrated $g$ = {g} showed no downward trend: the per-cycle speedup stayed between "
-            f"{x(min(c['spd'] for c in cyc))} and {x(max(c['spd'] for c in cyc))} (Table 9, Figure 7). The raw "
-            "per-round speedup varies between about 1.0× and 2.1×, but that is the articles taking turns, which is "
-            "why the table averages over full cycles.")
-    R.p("Power state mattered more than heat. In a separate short run on battery power the same laptop needed about "
-        "197 ms per normal pass instead of 124 ms. A draft size calibrated on mains power is then applied to a "
-        "different cost curve, which is the kind of instability UniSpec's limitations anticipate. Our software "
-        "therefore detects battery operation and stores such runs separately.")
+            f"speedup at $g$ = {g} showed no further downward trend: the mean speedup per cycle stayed between "
+            f"{x(min(c['spd'] for c in cyc))} and {x(max(c['spd'] for c in cyc))} (Table 9, Figure 7). This test cannot "
+            "rule out throttling, because it did not start from a cool machine: it followed more than an hour of "
+            f"benchmarks, and its one-token pass already took {cyc[0]['p1']:.0f} ms in the first cycle, against "
+            f"{rd.profile_at(r)[1]:.0f} ms in the profile measured near the start of the session. The slow-down may "
+            "have happened before the test began. The raw per-round speedup varies between about 1.0× and 2.1×, but "
+            "that is the articles taking turns, which is why the table averages over full cycles.")
+    R.p("Power state also matters. In one short informal run on battery, with other programs open, a normal pass took "
+        "about 197 ms, against 134 ms in the same short run on mains power (47% slower). It was not repeated, so it is "
+        "an indication only, but it is the kind of instability UniSpec's limitations anticipate: a draft size "
+        "calibrated in one state is then applied to a different cost curve. Our software therefore detects battery "
+        "operation and stores such runs separately.")
     R.figure("fig6_thermal.png",
              "Sustained load. Left: one-token and $(1+g^*)$-token pass times over 20 minutes. Right: speedup at the "
-             "calibrated $g^*$, averaged per cycle of held-out articles.")
+             "draft size shown, averaged per cycle of held-out articles.")
 
     # ---- 6 Discussion --------------------------------------------------------
     R.h1("Discussion")
@@ -747,26 +780,25 @@ def write_tex(results_root: str, out_tex: str):
         "GPU, so $\\tau$ can be measured once on any machine and only the latency curve, a two-minute measurement, "
         "has to be repeated per device. This is the practical value of PPD's decomposition for anyone without long "
         "access to the target hardware.")
-    R.p("<b>Everyday hardware sits at the far end of the cost curve.</b> UniSpec observes smaller optimal draft sizes "
-        "on consumer GPUs than on data-centre GPUs. The laptop CPU extends that trend: beyond the first extra token, "
-        "verification cost grows almost linearly with the draft size, the optimum falls to around 8–16, and a draft "
-        "size suited to a GPU loses 14% and can make individual requests slower than no speculation at all. The free "
-        "T4, in contrast, still had idle capacity at $g$ = 128, because a 0.5B model leaves it memory-bound; with "
-        "UniSpec's 8B–14B models its optimum would be lower.")
-    R.p("<b>Calibration selects well but predicts poorly.</b> Because the speedup curves are flat near their optimum, "
-        "every reasonable method chose a draft size close to the best. The predicted speedups, however, ranged from "
-        "14% too high to 2.7 times the measured value, because acceptance depends on how much each input is copied "
-        "and a handful of calibration articles does not represent that well. A deployment should calibrate on inputs "
-        "typical of its own workload and treat the predicted speedup as an upper estimate.")
-    R.p("<b>Profile-only calibration needs repeated measurements on shared hardware.</b> The PPD split rests on a "
-        "single synthetic latency profile. On a shared cloud GPU, transient slowdowns in a few readings moved its "
-        "choice from the largest draft size to $g$ = 7. Repeating the profile and taking the median per size, or "
-        "timing real decoding as UniSpec does, avoids this.")
+    R.p("<b>The draft size matters most on the weakest hardware.</b> UniSpec observes smaller optimal draft sizes on "
+        "consumer GPUs than on data-centre GPUs. The laptop CPU extends that trend: every verified token costs time, the "
+        f"optimum is small ($g$ = {cpu_bg}), and the largest size tested loses {cpu_loss_max} and makes "
+        "individual requests slower than no speculation. On the T4 the choice hardly matters above about 12, because a "
+        "0.5B model leaves it memory-bound and acceptance has already saturated; with UniSpec's 8B–14B models "
+        "verification would cost more and a sharper optimum is likely.")
+    R.p("<b>Calibration works when its inputs are representative.</b> On the CPU the fit chose the best tested size and "
+        "predicted the speedup almost exactly. On the GPU it over-predicted, because its calibration articles copied "
+        "more than the held-out ones. A deployment should calibrate on inputs typical of its own workload. How results "
+        "are averaged matters as much: means of per-article ratios were dominated by one article and would have "
+        "suggested that the GPU keeps improving up to the largest draft size.")
+    R.p("<b>Profile-only calibration needs repeated measurements on shared hardware.</b> The PPD split rests on a single "
+        "synthetic latency profile, and a few slow readings in it moved the extended GPU run's choice to $g$ = 7 or 8. "
+        "Repeating the profile at different times, or timing real decoding as UniSpec does, would guard against this.")
     R.p("<b>Tokenization decides the language result.</b> Fine-grained tokenization of Indian scripts is not a barrier "
         "to n-gram speculation: copied words become long, easily guessed runs of tokens. It is a barrier to latency on "
         "devices with slow prefill, because the same text costs several times more tokens to read. A tokenizer built "
-        "for these languages, such as Sarvam-1's, would shorten prompts by a similar factor and remove most of that "
-        "cost.")
+        "for these languages, such as Sarvam-1's, could shorten prompts considerably, though a "
+        "different tokenizer means a different model.")
 
     # ---- 7 Limitations -------------------------------------------------------
     R.h1("Limitations")
@@ -774,13 +806,15 @@ def write_tex(results_root: str, out_tex: str):
         "<b>Simplified UniSpec.</b> A single chain of drafted tokens replaces confidence-scored draft trees; we "
         "evaluate UniSpec's calibration, not its full drafter, so absolute speedups are not comparable with the paper.",
         "<b>No PPD drafter.</b> Its prompt-token embeddings require GPU training beyond our budget.",
-        "<b>One small model.</b> Qwen2.5-0.5B is far smaller than the papers' 7B–14B models. Larger models load the "
-        "GPU more and would lower its optimal draft size; on a CPU they would make every pass slower.",
+        "<b>One small model.</b> Qwen2.5-0.5B is smaller than the papers' models (1.4B to 14B). Larger models load the "
+        "GPU more and would probably lower its optimal draft size; on a CPU they would make every pass slower.",
         f"<b>Few devices.</b> {n_dev} device{'s' if n_dev != 1 else ''} so far. The benchmark runs unchanged on further "
         "CPUs and GPUs, and their results join every table and figure of this report on rebuilding.",
         "<b>Timing noise.</b> Laptop and shared-GPU timings are noisier than dedicated servers. Paired back-to-back runs, "
         "held-out articles and single-session comparisons reduce this, but differences below about 5% should not be "
         "over-interpreted.",
+        "<b>Small samples.</b> The CPU sweep uses 12 English articles and one run each, the language study five articles "
+        "per language on the CPU; a single unusual article can move an average.",
         "<b>Indian-language quality.</b> The small model copies heavily in these languages; acceptance is likely lower "
         "with stronger models.",
     ])
@@ -788,13 +822,14 @@ def write_tex(results_root: str, out_tex: str):
     # ---- 8 Conclusion ---------------------------------------------------------
     R.h1("Conclusion")
     R.p("The hardware-aware rule shared by UniSpec and PPD transfers to everyday hardware: acceptance is "
-        "device-independent, latency is not, and measuring latency per device selects a good draft size. The optimal "
-        f"draft size differs by an order of magnitude between a laptop CPU ({cpu_bg}) and a free cloud GPU "
-        f"({gpu_bg} or more), and using the wrong one costs 6–14% on average and can make individual requests slower "
-        "than normal decoding. Calibration chooses well but over-promises, because the gain depends as much on how much "
-        "the output copies its input as on the hardware. In Indian languages, fine-grained tokenization raises "
-        f"acceptance, up to {x(max(gpu_lang[l]['e2e'] for l in ind))} end to end on the GPU, but lengthens prompts so "
-        f"much that on a CPU reading them limits the gain to {x(min(cpu_lang[l]['e2e'] for l in ind))}–"
+        "device-independent, latency is not, and measuring latency per device selects a good draft size. On a laptop CPU "
+        f"the choice matters: the best tested size is {cpu_bg} ({x(cpu_peak)}), a GPU's setting costs {cpu_loss} and the "
+        f"largest tested size {cpu_loss_max}, and individual requests can become slower than normal decoding. On a free "
+        f"cloud GPU the curve is flat beyond about 12 ({x(gpu12)} to {x(gpu_peak)}), so a wrong choice costs little. "
+        "UniSpec-style calibration finds the CPU's best tested size and predicts its speedup closely when calibration "
+        "inputs resemble the real ones. In Indian languages, fine-grained tokenization raises acceptance, up to "
+        f"{x(max(gpu_lang[l]['e2e'] for l in ind))} end to end on the GPU, but lengthens prompts so much that on a CPU "
+        f"reading them limits the gain to {x(min(cpu_lang[l]['e2e'] for l in ind))}–"
         f"{x(max(cpu_lang[l]['e2e'] for l in ind))}.")
 
     # ---- References ------------------------------------------------------------
@@ -808,11 +843,13 @@ def write_tex(results_root: str, out_tex: str):
     R.h1("Draft-size sweeps in full")
     for r in swept:
         rows = [[g, f"{v['tau']:.2f}", pct(v["acceptance_rate"]), f"{v['mean_pass_len']:.1f}",
-                 f"{v['mean_pass_sec'] * 1000:.1f}", x(v["speedup"]), x(v["decode_speedup"]), pct(v["exact_match"])]
+                 f"{v['mean_pass_sec'] * 1000:.1f}", x(v["speedup"]), x(v["decode_speedup"]), x(v["speedup_mean"]), x(v["speedup_median"]),
+                 f"{v['speedup_max']:.1f}×", pct(v["exact_match"])]
                 for g, v in r.sweep.items()]
-        R.table(["$g$", "$\\tau$", "Accepted", "Tokens per pass", "Pass time (ms)", "Speedup", "Generation-only",
-                 "Exact match"], rows, f"Draft-size sweep on the {r.label}, all articles ($g$ = 0 is normal decoding).",
-                widths=[1.1, 1.4, 1.8, 2.3, 2.3, 1.9, 2.6, 2.1], here=True)
+        R.table(["$g$", "$\\tau$", "Accepted", "Tokens per pass", "Pass (ms)", "Speedup", "Gen. only", "Mean",
+                 "Median", "Max", "Exact"], rows, f"Draft-size sweep on the {r.label}, all articles ($g$ = 0 is normal decoding). Speedup and generation-only use "
+                "total time; mean, median and max are over per-article end-to-end speedups.",
+                widths=[0.9, 1.0, 1.7, 1.5, 1.3, 1.6, 1.4, 1.2, 1.4, 1.2, 1.2], here=True)
     R.h1("Fitted calibration models")
     fit_rows = []
     for r in runs:

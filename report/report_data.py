@@ -135,11 +135,11 @@ def split_copy(run: Run):
 
 def language_rows(run: Run):
     lg = run.exp["language"]
-    g = run.exp.get("calibration", {}).get("g_star") or max(lg["grid"])
+    g = max(lg["grid"])
     rows = []
     for lang in LANG_ORDER:
-        s = lg["summary"][lang][str(g)]
-        b = lg["summary"][lang]["0"]
+        agg = aggregate([r for r in lg["rows"] if r["lang"] == lang])
+        s, b = agg[g], agg[0]
         rows.append(dict(lang=lang, g=g, tau=s["tau"], acc=s["acceptance_rate"], e2e=s["speedup"],
                          gen=s["decode_speedup"], copy=s.get("copy_from_prompt", float("nan")),
                          rep=s.get("self_repeat", float("nan")), prefill=b["prefill_sec"],

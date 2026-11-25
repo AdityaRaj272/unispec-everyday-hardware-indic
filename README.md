@@ -21,12 +21,12 @@ maximises τ/s.
 
 * **UniSpec** (Do et al., ACL 2026) — training-free n-gram drafting with *device-aware calibration*:
   fit regression curves to τ(g) and s(g) on the target device, maximise their ratio with Differential
-  Evolution. Evaluated on four data-centre/workstation NVIDIA GPUs and seven non-Indian languages.
+  Evolution. Evaluated on four high-end NVIDIA GPUs (A100 to RTX 3090) and seven non-Indian languages.
 * **PPD** (Chen et al., EMNLP Findings 2025) — *hardware-aware tree pruning* with the same rule,
   splitting it into a hardware-independent part (acceptance, measured once) and a hardware-dependent
   part (forward latency, profiled per device).
 
-Both papers name the same open gaps: weak or unstable hardware, and morphologically rich languages.
+Between them the papers name these open gaps: limited compute, unstable hardware, and morphologically rich languages.
 This project tests the shared rule there:
 
 | Question | Experiment |
@@ -68,33 +68,31 @@ see **[results/SUMMARY.md](results/SUMMARY.md)** for every number.
   anything from 2 to 33 tokens — checking guesses is almost free. On the CPU a 2-token pass already
   costs 1.55× a 1-token pass and a 33-token pass 3.8×.
 * **τ really is device-independent:** on the 12 articles run on both devices, tokens gained per pass
-  agree to two decimals at every g (e.g. 2.60 vs 2.60 at g = 8) — the assumption behind both
+  agree within 0.05 at every g (e.g. 2.18 vs 2.18 at g = 8) — the assumption behind both
   UniSpec's calibration and PPD's "measure acceptance once" split.
-* **So the best draft size differs:** the CPU peaks at **1.62× around g = 8–16** and declines after
-  (1.44× at g = 32; on the least-copying articles g = 32 is slower than no guessing, 0.86–0.98×).
-  The T4 keeps improving up to the largest g tried: 3.17× at g = 32 and, in a second sweep reaching
-  g = 128 (`__wide-grid`), **4.10× at g = 128** — a 129-token pass still takes ~28 ms. With a 0.5B
-  model the T4 never runs out of spare capacity in this range.
-* **Cost of the wrong g (held-out articles):** the CPU running the T4's g = 32 gets 1.33× instead of
-  1.54× (−14%); the T4 running the CPU's g = 14 gets 2.22× instead of 2.36× (−6%).
-* **Calibration:** on the CPU, measured together on unseen articles in one session, UniSpec's fit
-  (g\* = 14) gives 1.48×, grid search (g\* = 12) 1.47×, the PPD split with the quick synthetic profile
-  (g\* = 22) 1.42×, and the PPD split using τ measured on the *T4* (g\* = 20) 1.38× — all within 10%,
-  because the CPU's speedup curve is flat between g = 8 and 22. On the T4 all methods — including the
-  PPD split using τ measured on the *laptop* — pick g = 32 (the top of that grid); in the wide sweep,
-  UniSpec's fit and grid search pick g = 128. The PPD split relies on one short synthetic timing
-  profile, and on the shared cloud GPU a few of its readings jump from ~28 to ~40 ms; with τ measured
-  on the laptop it then picks g = 7 (1.88× instead of 2.30×). All methods over-predict the speedup,
-  because acceptance depends on how much each article is copied.
+* **So the devices respond differently to g:** speedups here are total baseline time over total
+  speculative time. The CPU peaks at **1.53× at g = 8** and falls to 1.27× at g = 32, where 4 of 12
+  articles were slower than no guessing (0.86–0.98×). The T4 reaches 2.11× at g = 12 and then stays flat
+  up to g = 128 (2.20×): a 129-token pass still costs about 1.5× a one-token pass at most, but acceptance
+  has saturated. Per-article *averages* would suggest 4.10× at g = 128, but one article copied word for word
+  (39.8×) causes that; the median is 2.04×.
+* **Cost of the wrong g (held-out articles):** the CPU loses 8% with the T4's calibrated g = 19 and 17% with
+  g = 32; the T4 loses 4–5% with the CPU's g = 8.
+* **Calibration:** on the CPU, UniSpec's fit and grid search both pick g = 8, the best tested size, and the fit
+  predicts generation-only speedup closely (1.70× vs 1.68× measured); the PPD split picks 9–10, also with τ
+  measured on the T4. On the T4 the curve is flat, so the methods pick anything from 7 to 128 and all deliver
+  1.84–1.95× end to end. The fit over-predicts there by 25–30%, because the calibration articles copied
+  more (60%) than the held-out ones (43%).
 * **Speedup follows copying:** per article, generation-only speedup grows steadily with the share of
   the output copied from the article, on both devices (fig. 7).
 * **Languages:** Qwen's tokenizer needs 4.7–10.1 tokens per word for Hindi/Marathi/Bengali/Tamil vs 1.3
   for English. Contrary to our hypothesis, tokens gained per pass are *higher* (the 0.5B model copies
-  the article heavily, and each copied word is many tokens). On the T4 this gives **5.6–8.6× end to
-  end** (Hindi 8.55×). On the CPU the 3–7× longer prompts take long to read, which guessing cannot speed
-  up, so end-to-end gains shrink to 1.42–1.90× although generation alone is 2.7–3.9× faster.
-* **Sustained load:** over 20 minutes of continuous load the plugged-in laptop showed no throttling
-  trend; the calibrated g kept its speedup (1.45–1.50× per cycle of prompts).
+  the article heavily, and each copied word is many tokens). On the T4 this gives **5.2–6.5× end to
+  end** (Hindi 6.53×). On the CPU the 3–7× longer prompts take long to read, which guessing cannot speed
+  up, so end-to-end gains shrink to 1.41–1.88× although generation alone is 2.7–3.7× faster.
+* **Sustained load:** over 20 minutes of continuous load the plugged-in laptop got no slower (1.45–1.51× per
+  cycle of prompts). It started warm after more than an hour of benchmarks (one-token pass 155 ms against
+  130 ms profiled earlier), so this does not rule out throttling.
 
 ## Run it
 
@@ -124,9 +122,8 @@ python report/build_report.py        # report/report.pdf, rebuilt from results/ 
 ### Adding a new device
 
 Run the commands above on the new machine and copy its `results/<device-name>/` folder into this
-repo's `results/`. `python run.py plots` then includes it in every figure. Re-running
-`python run.py calibrate --force` on a device afterwards also adds the "τ measured on another
-device" (PPD split) comparison.
+repo's `results/`. `python run.py plots` then includes it in every figure. `python scripts/recompute_calibration.py`
+then adds the "τ measured on another device" (PPD split) comparison without running any model.
 
 ## Report
 
@@ -165,7 +162,7 @@ The decoding engine and its tests are adapted from our earlier RetroSpec engine
 * A single chain of guesses, not UniSpec's confidence-scored draft trees; PPD's trained prompt
   tokens are not reproduced (they need GPU training). Both papers are used for their shared
   hardware-aware calibration rule.
-* A 0.5B model, far smaller than the 7–14B models in the papers; its summaries in Indian languages
+* A 0.5B model, smaller than the 1.4–14B models in the papers; its summaries in Indian languages
   are of low quality. Decoding is lossless, so this affects what is generated, not the validity of
   the speed comparison.
 * Laptop timings are noisier than server timings; every speedup is a paired, per-prompt ratio

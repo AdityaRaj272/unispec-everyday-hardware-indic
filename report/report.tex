@@ -54,7 +54,7 @@ Yash Pratap Singh (230106084)\par}
 \small
 \begin{center}\textbf{Abstract}\end{center}
 \vspace{-4pt}
-Speculative decoding speeds up a language model by drafting several future tokens cheaply and verifying them in one forward pass, while producing exactly the text that normal decoding would. Two recent methods, UniSpec \cite{unispec} and Hardware-Aware Parallel Prompt Decoding (PPD) \cite{ppd}, choose how many tokens to draft with the same hardware-aware rule: maximise tokens accepted per pass, $\tau(g)$, divided by the pass time, $s(g)$, measured on the target device. Both evaluate this rule only on data-centre and workstation GPUs and name weak or unstable hardware and morphologically rich languages as open gaps. We test the rule on Intel Core i7-8550U CPU and Tesla T4 GPU, using a training-free n-gram drafter, Qwen2.5-0.5B-Instruct and news summarisation in English, Hindi, Marathi, Bengali and Tamil. Acceptance is device-independent: on articles run on every device, $\tau$ agrees within 0.02. Pass time is not: checking 32 extra tokens costs 1.24 times a one-token pass on the Tesla T4 but 3.8 times on the Intel Core i7-8550U. The best draft size is therefore 8 on the CPU (1.62$\times$) and 128 or more on the GPU (4.10$\times$). Using a draft size calibrated on another device loses 6--14\%, and on articles that copy little from their source a large draft size is slower than normal decoding. UniSpec-style calibration and grid search pick good draft sizes but over-predict the gain, because the speedup is governed by how much the output copies its input. Qwen's tokenizer splits the Indian languages into 4.7--10.1 tokens per word against 1.27 for English; this raises acceptance, giving up to 8.55$\times$ end to end on the GPU, but makes prompts so long that reading them limits the CPU's end-to-end gain to 1.42$\times$--1.90$\times$.
+Speculative decoding speeds up a language model by drafting several future tokens cheaply and verifying them in one forward pass, while producing exactly the text that normal decoding would. Two recent methods, UniSpec \cite{unispec} and Hardware-Aware Parallel Prompt Decoding (PPD) \cite{ppd}, choose how many tokens to draft with the same hardware-aware rule: maximise tokens accepted per pass, $\tau(g)$, divided by the pass time, $s(g)$, measured on the target device. Both evaluate this rule only on high-end NVIDIA GPUs; between them they name limited compute, unstable hardware and morphologically rich languages as open gaps. We test the rule on Intel Core i7-8550U CPU and Tesla T4 GPU, using a training-free n-gram drafter, Qwen2.5-0.5B-Instruct and news summarisation in English, Hindi, Marathi, Bengali and Tamil. Acceptance is device-independent: on articles run on every device, $\tau$ agrees within 0.05. Pass time is not: checking 32 extra tokens costs 1.24 times a one-token pass on the Tesla T4 but 3.8 times on the Intel Core i7-8550U. The CPU is therefore fastest at a draft size of 8 (1.53$\times$ by total time) and falls off beyond it, while the GPU reaches 2.11$\times$ at 12 and then stays flat up to 128: larger drafts bring it almost nothing but also cost it nothing. A draft size calibrated on the GPU makes the CPU 8\% slower than its own, the largest one tested 17\% slower, and on articles that copy little it is slower than normal decoding. UniSpec-style calibration finds the CPU's best tested draft size and predicts its generation speedup closely (1.70$\times$ against 1.68$\times$ measured on held-out articles); on the GPU it over-predicts by 25\%--30\%, because the gain depends on how much the output copies its input. Qwen's tokenizer splits the Indian languages into 4.7--10.1 tokens per word against 1.27 for English; this raises acceptance, giving up to 6.53$\times$ end to end on the GPU, but makes prompts so long that reading them limits the CPU's end-to-end gain to 1.41$\times$--1.88$\times$.
 
 \end{minipage}
 \end{titlepage}
@@ -67,7 +67,7 @@ Large language models generate text autoregressively: one token per forward pass
 
 Speculative decoding \cite{leviathan,chen} puts that idle capacity to work. A cheap drafter proposes the next few tokens; the model scores all of them in a single pass; every proposed token up to the first disagreement is kept, followed by the model's own token at that position. Under greedy decoding the result is identical to normal decoding, so the method is lossless and only latency changes. The drafter can be a smaller model, extra trained heads or tokens, or a lookup of text already in the context \cite{medusa,eagle,lookahead,pld,rest}.
 
-How many tokens to draft is a hardware question. More drafted tokens raise the number accepted per pass but also lengthen each pass, by an amount that depends on the device. UniSpec \cite{unispec} and PPD \cite{ppd} resolve this the same way: measure the device and choose the draft size that maximises accepted tokens per unit time. Both papers evaluate only on NVIDIA data-centre and workstation GPUs, and both list weak, unstable or shared hardware and morphologically rich languages among their limitations.
+How many tokens to draft is a hardware question. More drafted tokens raise the number accepted per pass but also lengthen each pass, by an amount that depends on the device. UniSpec \cite{unispec} and PPD \cite{ppd} resolve this the same way: measure the device and choose the draft size that maximises accepted tokens per unit time. Both papers evaluate only on high-end NVIDIA GPUs, from data-centre cards to the RTX 3090 and 4090. UniSpec lists unstable or shared hardware and languages with richer morphology among its limitations; PPD lists GPUs with limited compute among their limitations.
 
 This project tests the shared rule where the papers did not: on an ordinary laptop processor and a free cloud GPU, under sustained load, and in four Indian languages. It continues our proposal and mid-project report. At the mid-project stage, a seven-method benchmark of our decoding engine on a T4 GPU found that a 1B-parameter draft model gave 1.13$\times$ while n-gram drafting gave only 1.04$\times$ on short open-domain questions, with 12\% of drafted tokens accepted, because such answers contain nothing to copy. The present study therefore uses a grounded task, news summarisation, in which outputs reuse input text. Our contributions are:
 
@@ -140,14 +140,14 @@ to $\tau$ and to the mean pass time measured in real decoding on the device, and
 \begin{equation}
 \mathrm{speedup}_{\mathrm{PPD}}(g)=\frac{\tau(g)\,s(1)}{s\bigl(k_{\mathrm{avg}}(g)\bigr)}
 \end{equation}
-Each chosen $g$ is then measured on held-out articles. When any chosen $g$ lies between the sweep's grid points, all chosen values are re-measured together in one session, so that no method is compared against numbers taken under different machine conditions.
+Each chosen $g$ is checked on held-out articles by reading the measured speedup off the same device's draft-size sweep, interpolating in $\log_2 g$ between tested sizes, so that no method is compared against numbers taken under different machine conditions. The formulas describe the decode phase, so predictions are compared with generation-only speedup.
 
 \subsection{Model, data and protocol}
 \begin{itemize}
   \item \textbf{Model.} Qwen2.5-0.5B-Instruct \cite{qwen}, scaled-dot-product attention, batch size 1. It is small enough to run on any laptop processor and is openly downloadable.
   \item \textbf{Data.} The XL-Sum \cite{xlsum} test sets for English, Hindi, Marathi, Bengali and Tamil (BBC news). From each, 40 articles of at least 300 words are drawn with a fixed seed and truncated to their first 250 words; alternate articles form a calibration split and a held-out split.
   \item \textbf{Task.} Summarise the article in 4--5 sentences in its own language. A system message keeps the small model from answering Indian-language articles in English. Summarisation is grounded: the output can reuse input phrases, which an n-gram drafter needs.
-  \item \textbf{Decoding.} Greedy, 128 new tokens. After warm-up, every article is decoded with the baseline and with every draft size back to back, in a shuffled order, and speedups are computed per article and then averaged. Pairing makes slow drifts in machine state affect all methods equally.
+  \item \textbf{Decoding.} Greedy, 128 new tokens. After warm-up, every article is decoded with the baseline and then, back to back, with every draft size in a shuffled order, so that slow drifts in machine state affect all methods similarly.
 \end{itemize}
 The prompt, identical for every language apart from the language name, is:
 
@@ -173,7 +173,7 @@ Tesla T4 GPU (extended sweep) & Tesla T4; 14.6 GB VRAM & fp16 & 15 + 15 & 3 & 1-
 \end{tabular}
 \end{table}
 \subsection{Metrics and experiments}
-\textbf{Correctness} is the share of runs whose token ids equal greedy decoding exactly. \textbf{$\tau$} is generated tokens after the first divided by decode passes. \textbf{Speedup} is baseline latency over speculative latency for the same article; \emph{end to end} includes reading the prompt (prefill), \emph{generation-only} excludes it, since speculation cannot accelerate prefill. \textbf{Copy share} is the fraction of the summary's 4-token sequences that also occur in the article; \textbf{self-repeat} is the fraction that occurred earlier in the summary itself. \textbf{Tokens per word} is tokenizer pieces per whitespace-separated word. The experiments are:
+\textbf{Correctness} is the share of runs whose token ids equal greedy decoding exactly. \textbf{$\tau$} is generated tokens after the first divided by decode passes. \textbf{Speedup} is total baseline time over total speculative time across articles, and $\tau$ is likewise total tokens over total passes, as in Equation 1. Averaging per-article ratios instead would let a single article that is copied word for word dominate, so per-article averages are given only in Appendix A; \emph{end to end} includes reading the prompt (prefill), \emph{generation-only} excludes it, since speculation cannot accelerate prefill. \textbf{Copy share} is the fraction of the summary's 4-token sequences that also occur in the article; \textbf{self-repeat} is the fraction that occurred earlier in the summary itself. \textbf{Tokens per word} is tokenizer pieces per whitespace-separated word. The experiments are:
 
 \begin{enumerate}
   \item correctness at $g$ = 2, 8 and 32;
@@ -219,34 +219,36 @@ The devices sit at opposite ends of the cost curve (Figure 1, Table 2): on the I
 \toprule
 \textbf{$g$} & \textbf{$\tau$, Intel Core i7-8550U CPU} & \textbf{$\tau$, Tesla T4 GPU} & \textbf{$\tau$, Tesla T4 GPU (extended sweep)} \\
 \midrule
-1 & 1.48 & 1.48 & 1.48 \\
-2 & 1.79 & 1.79 & 1.79 \\
-4 & 2.19 & 2.19 & 2.19 \\
-8 & 2.60 & 2.60 & 2.60 \\
-16 & 3.00 & 3.02 & 3.02 \\
-32 & 3.25 & 3.25 & 3.25 \\
+1 & 1.46 & 1.46 & 1.46 \\
+2 & 1.71 & 1.71 & 1.71 \\
+4 & 1.98 & 1.98 & 1.98 \\
+8 & 2.18 & 2.18 & 2.18 \\
+16 & 2.30 & 2.36 & 2.36 \\
+32 & 2.36 & 2.36 & 2.36 \\
 \bottomrule
 \end{tabular}
 \end{table}
-On the 12 articles summarised in every run, $\tau$ agrees to within 0.02 at every draft size (Table 3, Figure 2 left), although the devices differ in architecture, precision and speed by more than a factor of four. The remaining differences come from the half-precision near-ties above, which occasionally change the text and with it the acceptance. This confirms the assumption behind both UniSpec's calibration and PPD's split: acceptance can be measured once, and only latency needs to be measured per device.
+On the 12 articles summarised in every run, $\tau$ agrees to within 0.05 at every draft size (Table 3, Figure 2 left), although the devices differ in architecture, precision and speed by more than a factor of four. The remaining differences come from the half-precision near-ties above, which occasionally change the text and with it the acceptance. This confirms the assumption behind both UniSpec's calibration and PPD's split: acceptance can be measured once, and only latency needs to be measured per device.
 
 \subsection{Optimal draft size and the cost of a wrong one}
 \begin{table}[tbp]
 \centering
 \small
-\caption{Mean end-to-end speedup over normal decoding by draft size, all articles. Bold: the best draft size of each run.}
+\caption{End-to-end speedup over normal decoding by draft size (total time, all articles). Bold: the best tested size of each run.}
 \setlength{\tabcolsep}{4pt}
 \begin{tabular}{L{2.89cm}L{1.34cm}L{1.34cm}L{1.34cm}L{1.34cm}L{1.34cm}L{1.34cm}L{1.34cm}L{1.34cm}}
 \toprule
 \textbf{Run} & \textbf{$g$ = 1} & \textbf{$g$ = 2} & \textbf{$g$ = 4} & \textbf{$g$ = 8} & \textbf{$g$ = 16} & \textbf{$g$ = 32} & \textbf{$g$ = 64} & \textbf{$g$ = 128} \\
 \midrule
-Intel Core i7-8550U CPU & 1.15$\times$ & 1.34$\times$ & 1.51$\times$ & \textbf{1.62$\times$} & 1.61$\times$ & 1.44$\times$ & -- & -- \\
-Tesla T4 GPU & 1.33$\times$ & 1.60$\times$ & 1.95$\times$ & 2.31$\times$ & 2.73$\times$ & \textbf{3.17$\times$} & -- & -- \\
-Tesla T4 GPU (extended sweep) & 1.34$\times$ & 1.60$\times$ & 1.94$\times$ & 2.42$\times$ & 2.79$\times$ & 3.26$\times$ & 3.56$\times$ & \textbf{4.10$\times$} \\
+Intel Core i7-8550U CPU & 1.14$\times$ & 1.32$\times$ & 1.45$\times$ & \textbf{1.53$\times$} & 1.47$\times$ & 1.27$\times$ & -- & -- \\
+Tesla T4 GPU & 1.31$\times$ & 1.54$\times$ & 1.79$\times$ & 1.97$\times$ & 2.09$\times$ & 2.14$\times$ & -- & -- \\
+Tesla T4 GPU (extended sweep) & 1.33$\times$ & 1.54$\times$ & 1.80$\times$ & 2.05$\times$ & 2.15$\times$ & 2.21$\times$ & 2.20$\times$ & 2.20$\times$ \\
 \bottomrule
 \end{tabular}
 \end{table}
-Because $\tau$ is shared and $s(g)$ is not, the devices want very different draft sizes (Table 4, Figure 2): the Intel Core i7-8550U CPU peaks at $g$ = 8 (1.62$\times$); the Tesla T4 GPU peaks at $g$ = 32 (3.17$\times$), the largest size tried; the Tesla T4 GPU (extended sweep) peaks at $g$ = 128 (4.10$\times$), the largest size tried. On the CPU the speedup falls to 1.44$\times$ at $g$ = 32, and for the 4 articles that copied least from their source $g$ = 32 was slower than normal decoding (0.86$\times$, 0.87$\times$, 0.97$\times$, 0.98$\times$). On the Tesla T4 the curve is still rising at the largest draft size tested: with a 0.5B model the GPU never runs out of spare capacity in this range, so its true optimum may be higher still.
+Because $\tau$ is shared and $s(g)$ is not, the devices respond very differently to the draft size (Table 4, Figure 2). The best tested sizes are Intel Core i7-8550U CPU: $g$ = 8 (1.53$\times$); Tesla T4 GPU: $g$ = 24 (2.16$\times$); Tesla T4 GPU (extended sweep): $g$ = 96 (2.23$\times$). On the CPU the curve has a clear peak and falls to 1.27$\times$ at $g$ = 32, where 4 of the 12 articles were slower than normal decoding (0.86$\times$, 0.87$\times$, 0.97$\times$, 0.98$\times$). On the Tesla T4 the curve rises to 2.11$\times$ at $g$ = 12 and is then flat within measurement noise up to $g$ = 128 (2.20$\times$), so its exact optimum is not well determined: acceptance saturates near $\tau$ = 2.4 while a pass costs almost the same.
+
+Averages of per-article speedups tell a misleading story here. At $g$ = 128 on the Tesla T4 their mean is 4.10$\times$, but their median is 2.04$\times$, because one article whose summary copies the source word for word runs 39.8$\times$ faster. Total time, which is what Equation 1 describes, is not distorted in this way.
 
 \begin{figure}[tbp]
 \centering
@@ -262,14 +264,14 @@ Because $\tau$ is shared and $s(g)$ is not, the devices want very different draf
 \toprule
 \textbf{Run} & \textbf{Own $g^*$} & \textbf{Speedup} & \textbf{$g^*$ calibrated elsewhere} & \textbf{Speedup} & \textbf{Loss} \\
 \midrule
-Intel Core i7-8550U CPU & 14 & 1.54$\times$ & 32 (Tesla T4 GPU) & 1.33$\times$ & 13\% \\
-Tesla T4 GPU & 32 & 2.36$\times$ & 14 (Intel Core i7-8550U CPU) & 2.22$\times$ & 6\% \\
-Tesla T4 GPU (extended sweep) & 128 & 2.45$\times$ & 14 (Intel Core i7-8550U CPU) & 2.12$\times$ & 13\% \\
-Tesla T4 GPU (extended sweep) & 128 & 2.45$\times$ & 32 (Tesla T4 GPU) & 2.35$\times$ & 4\% \\
+Intel Core i7-8550U CPU & 8 & 1.53$\times$ & 19 (Tesla T4 GPU) & 1.41$\times$ & 8\% \\
+Tesla T4 GPU & 19 & 1.91$\times$ & 8 (Intel Core i7-8550U CPU) & 1.81$\times$ & 5\% \\
+Tesla T4 GPU (extended sweep) & 108 & 1.95$\times$ & 8 (Intel Core i7-8550U CPU) & 1.88$\times$ & 4\% \\
+Tesla T4 GPU (extended sweep) & 108 & 1.95$\times$ & 19 (Tesla T4 GPU) & 1.90$\times$ & 3\% \\
 \bottomrule
 \end{tabular}
 \end{table}
-Using a draft size calibrated elsewhere costs speed on every run (Table 5, Figure 3). The CPU loses most, because the GPU's large draft size sits on the steep part of the CPU's cost curve; the GPU loses less because a small draft size only forgoes acceptance it could have had for free. Averaged over articles no run fell below 1.0$\times$ with a foreign draft size, but individual articles did on the CPU, as noted above.
+A mis-tuned draft size matters on the CPU and hardly at all on the GPU (Table 5, Figure 3). The CPU loses 8\% with the draft size calibrated on the Tesla T4 ($g$ = 19) and 17\% with the largest size tested ($g$ = 32), because it pays for every extra token. The GPU loses 4\%--5\% with the CPU's smaller size, since it only forgoes a little acceptance it could have had for free. No run fell below 1.0$\times$ overall, but individual articles did on the CPU, as noted above.
 
 \begin{figure}[tbp]
 \centering
@@ -280,39 +282,41 @@ Using a draft size calibrated elsewhere costs speed on every run (Table 5, Figur
 \begin{table}[tbp]
 \centering
 \small
-\caption{Draft size chosen by each method, the speedup it predicted from the calibration articles, and the speedup measured on held-out articles.}
+\caption{Draft size chosen by each method, the generation-only speedup it predicted from the calibration articles, the generation-only speedup measured on held-out articles, and the end-to-end speedup there.}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{L{3.55cm}L{5.41cm}L{1.03cm}L{1.77cm}L{2.99cm}}
+\begin{tabular}{L{3.29cm}L{5.13cm}L{0.92cm}L{1.65cm}L{1.65cm}L{1.83cm}}
 \toprule
-\textbf{Run} & \textbf{Method} & \textbf{$g^*$} & \textbf{Predicted} & \textbf{Measured (held-out)} \\
+\textbf{Run} & \textbf{Method} & \textbf{$g^*$} & \textbf{Predicted} & \textbf{Measured} & \textbf{End to end} \\
 \midrule
-Intel Core i7-8550U CPU & Grid search & 12 & 1.68$\times$ & 1.47$\times$ \\
-Intel Core i7-8550U CPU & UniSpec fit & 14 & 2.23$\times$ & 1.48$\times$ \\
-Intel Core i7-8550U CPU & PPD split & 22 & 1.93$\times$ & 1.42$\times$ \\
-Intel Core i7-8550U CPU & PPD split, $\tau$ from Tesla T4 GPU & 20 & 2.28$\times$ & 1.38$\times$ \\
-Tesla T4 GPU & Grid search & 32 & 3.98$\times$ & 2.36$\times$ \\
-Tesla T4 GPU & UniSpec fit & 32 & 4.07$\times$ & 2.36$\times$ \\
-Tesla T4 GPU & PPD split & 32 & 3.85$\times$ & 2.36$\times$ \\
-Tesla T4 GPU & PPD split, $\tau$ from Intel Core i7-8550U CPU & 32 & 3.06$\times$ & 2.36$\times$ \\
-Tesla T4 GPU (extended sweep) & Grid search & 128 & 5.76$\times$ & 2.30$\times$ \\
-Tesla T4 GPU (extended sweep) & UniSpec fit & 128 & 6.28$\times$ & 2.30$\times$ \\
-Tesla T4 GPU (extended sweep) & PPD split & 128 & 5.86$\times$ & 2.30$\times$ \\
-Tesla T4 GPU (extended sweep) & PPD split, $\tau$ from Tesla T4 GPU & 31 & 2.87$\times$ & 2.26$\times$ \\
-Tesla T4 GPU (extended sweep) & PPD split, $\tau$ from Intel Core i7-8550U CPU & 7 & 2.39$\times$ & 1.88$\times$ \\
+Intel Core i7-8550U CPU & Grid search & 8 & 1.68$\times$ & 1.68$\times$ & 1.53$\times$ \\
+Intel Core i7-8550U CPU & UniSpec fit & 8 & 1.70$\times$ & 1.68$\times$ & 1.53$\times$ \\
+Intel Core i7-8550U CPU & PPD split & 9 & 1.41$\times$ & 1.66$\times$ & 1.51$\times$ \\
+Intel Core i7-8550U CPU & PPD split, $\tau$ from Tesla T4 GPU & 10 & 1.57$\times$ & 1.64$\times$ & 1.50$\times$ \\
+Intel Core i7-8550U CPU & PPD split, $\tau$ from Tesla T4 GPU (extended sweep) & 10 & 1.59$\times$ & 1.64$\times$ & 1.50$\times$ \\
+Tesla T4 GPU & Grid search & 24 & 2.47$\times$ & 1.94$\times$ & 1.92$\times$ \\
+Tesla T4 GPU & UniSpec fit & 19 & 2.41$\times$ & 1.92$\times$ & 1.91$\times$ \\
+Tesla T4 GPU & PPD split & 16 & 2.29$\times$ & 1.91$\times$ & 1.90$\times$ \\
+Tesla T4 GPU & PPD split, $\tau$ from Intel Core i7-8550U CPU & 15 & 2.00$\times$ & 1.92$\times$ & 1.90$\times$ \\
+Tesla T4 GPU & PPD split, $\tau$ from Tesla T4 GPU (extended sweep) & 16 & 2.33$\times$ & 1.91$\times$ & 1.90$\times$ \\
+Tesla T4 GPU (extended sweep) & Grid search & 128 & 2.62$\times$ & 1.91$\times$ & 1.89$\times$ \\
+Tesla T4 GPU (extended sweep) & UniSpec fit & 108 & 2.56$\times$ & 1.97$\times$ & 1.95$\times$ \\
+Tesla T4 GPU (extended sweep) & PPD split & 7 & 2.22$\times$ & 1.86$\times$ & 1.84$\times$ \\
+Tesla T4 GPU (extended sweep) & PPD split, $\tau$ from Intel Core i7-8550U CPU & 8 & 2.02$\times$ & 1.89$\times$ & 1.88$\times$ \\
+Tesla T4 GPU (extended sweep) & PPD split, $\tau$ from Tesla T4 GPU & 7 & 2.20$\times$ & 1.86$\times$ & 1.84$\times$ \\
 \bottomrule
 \end{tabular}
 \end{table}
-On the Intel Core i7-8550U CPU, measured together in one session on held-out articles, the methods chose $g$ between 12 and 22 and delivered 1.38$\times$--1.48$\times$, within about 10\% of each other, because the CPU's speedup curve is nearly flat around its optimum (Table 6, Figure 4). On the Tesla T4, every method in the first sweep, including the PPD split using $\tau$ measured on the CPU, chose the largest draft size tested, and in the extended sweep UniSpec's fit and grid search again chose the largest size.
+On the Intel Core i7-8550U CPU, UniSpec's fit and grid search both choose the best tested size, $g$ = 8, and the fit predicts its generation speedup almost exactly: 1.70$\times$ against 1.68$\times$ measured (Table 6, Figure 4). The PPD split, including with $\tau$ taken from the GPU, chooses $g$ between 9 and 10 and stays within 3\% of the best, although its synthetic profile makes it under-predict the speedup.
 
-Two effects stand out. First, every method over-predicts the speedup, by 14\% for grid search on the CPU and by up to 2.7 times for the UniSpec fit on the extended GPU sweep. Section 5.5 shows why: the speedup depends strongly on how much each article is copied, and the calibration articles happened to copy more than the held-out ones. Second, the PPD split relies on one short synthetic latency profile. On the shared cloud GPU a few profile readings jumped from about 28 to 40 ms; combined with $\tau$ from the CPU, whose sweep stopped at $g$ = 32, the split then chose $g$ = 7 and lost about 18\% against the fit. Methods that time real decoding were not affected.
+On the Tesla T4 the methods choose sizes from 7 to 128 depending on the sweep, which is what a flat curve implies: all of them deliver between 1.84$\times$ and 1.95$\times$ end to end. The fit over-predicts there, by 25\%--30\%, because the GPU's calibration articles copied clearly more than its held-out ones (Section 5.5). In the extended GPU run the PPD split chooses 7 or 8 because several readings of its short latency profile are 38--47 ms instead of about 28 ms, probably interference on the shared machine; on this flat curve that costs little, but it shows how sensitive a profile-only method is to noise.
 
 \begin{figure}[tbp]
 \centering
 \includegraphics[width=1.00\linewidth]{fig4_calibration_methods.png}
-\caption{Calibration methods per run: speedup predicted from the calibration articles (light) and measured on held-out articles (dark), with the chosen $g^*$.}
+\caption{Calibration methods per run: generation-only speedup predicted from the calibration articles (light) and measured on held-out articles (dark), with the chosen $g^*$.}
 \end{figure}
 \subsection{Copying drives the speedup}
-Across articles the speedup varies widely, and the share of the summary copied from the article explains most of that variation (Figure 5). At $g$ = 8 the Pearson correlation between copy share and generation-only speedup is $r$ = 0.85 over 32 articles on the Intel Core i7-8550U CPU; $r$ = 0.85 over 115 articles on the Tesla T4 GPU; $r$ = 0.87 over 30 articles on the Tesla T4 GPU (extended sweep). On the CPU, English summaries that copy about 20\% of their 4-token sequences run about 1.1$\times$ faster, while those that copy 90\% run about 3.4$\times$ faster. The calibration articles copied 54\% on average and the held-out articles 50\%, consistent with the over-prediction in Section 5.4. For a retrieval drafter, the task decides how much can be gained and the hardware decides how large $g$ can usefully be.
+Across articles the speedup varies widely, and the share of the summary copied from the article explains most of that variation (Figure 5). At $g$ = 8 the Pearson correlation between copy share and generation-only speedup is $r$ = 0.85 over 32 articles on the Intel Core i7-8550U CPU; $r$ = 0.85 over 115 articles on the Tesla T4 GPU; $r$ = 0.87 over 30 articles on the Tesla T4 GPU (extended sweep). On the CPU, English summaries that copy about 20\% of their 4-token sequences run about 1.1$\times$ faster, while the one that copies 91\% runs about 3.4$\times$ faster. This also explains the calibration results: on the CPU the calibration and held-out articles copied similarly (54\% and 50\%) and the prediction was accurate, while on the GPU they differed (60\% and 43\%) and it was too high. For a retrieval drafter, the task decides how much can be gained and the hardware decides how large $g$ can usefully be.
 
 \begin{figure}[tbp]
 \centering
@@ -342,35 +346,35 @@ Qwen2.5's tokenizer splits the Indian languages into 4.7--10.1 tokens per word a
 \begin{table}[tbp]
 \centering
 \small
-\caption{Language study on held-out articles at each device's calibrated draft size. Copied and repeated: share of the summary's 4-token sequences found in the article and earlier in the summary. Prefill is the time normal decoding spends reading the prompt.}
+\caption{Language study on held-out articles (total time), at the largest draft size run on each device. Copied and repeated: share of the summary's 4-token sequences found in the article and earlier in the summary. Prefill is the time normal decoding spends reading the prompt.}
 \setlength{\tabcolsep}{4pt}
 \begin{tabular}{L{2.76cm}L{1.65cm}L{1.38cm}L{1.65cm}L{1.01cm}L{2.11cm}L{1.75cm}L{1.56cm}}
 \toprule
 \textbf{Run} & \textbf{Language} & \textbf{Copied} & \textbf{Repeated} & \textbf{$\tau$} & \textbf{Generation only} & \textbf{End to end} & \textbf{Prefill (s)} \\
 \midrule
-Intel Core i7-8550U, $g$ = 14 & English & 56\% & 0\% & 2.85 & 1.90$\times$ & 1.64$\times$ & 2.78 \\
-Intel Core i7-8550U, $g$ = 14 & Hindi & 94\% & 5\% & 8.37 & 3.92$\times$ & 1.90$\times$ & 8.50 \\
-Intel Core i7-8550U, $g$ = 14 & Marathi & 92\% & 12\% & 6.73 & 2.99$\times$ & 1.64$\times$ & 11.28 \\
-Intel Core i7-8550U, $g$ = 14 & Bengali & 99\% & 9\% & 8.45 & 3.57$\times$ & 1.68$\times$ & 12.66 \\
-Intel Core i7-8550U, $g$ = 14 & Tamil & 100\% & 6\% & 6.92 & 2.73$\times$ & 1.42$\times$ & 20.14 \\
-Tesla T4, $g$ = 32 & English & 42\% & 3\% & 2.46 & 2.27$\times$ & 2.23$\times$ & 0.03 \\
-Tesla T4, $g$ = 32 & Hindi & 94\% & 4\% & 12.10 & 10.16$\times$ & 8.55$\times$ & 0.06 \\
-Tesla T4, $g$ = 32 & Marathi & 95\% & 7\% & 11.85 & 9.58$\times$ & 7.44$\times$ & 0.09 \\
-Tesla T4, $g$ = 32 & Bengali & 97\% & 7\% & 12.61 & 10.10$\times$ & 7.70$\times$ & 0.10 \\
-Tesla T4, $g$ = 32 & Tamil & 98\% & 12\% & 9.76 & 7.47$\times$ & 5.63$\times$ & 0.15 \\
+Intel Core i7-8550U, $g$ = 14 & English & 56\% & 0\% & 2.64 & 1.81$\times$ & 1.60$\times$ & 2.78 \\
+Intel Core i7-8550U, $g$ = 14 & Hindi & 94\% & 5\% & 7.56 & 3.69$\times$ & 1.88$\times$ & 8.50 \\
+Intel Core i7-8550U, $g$ = 14 & Marathi & 92\% & 12\% & 6.23 & 2.85$\times$ & 1.63$\times$ & 11.28 \\
+Intel Core i7-8550U, $g$ = 14 & Bengali & 99\% & 9\% & 8.04 & 3.41$\times$ & 1.67$\times$ & 12.66 \\
+Intel Core i7-8550U, $g$ = 14 & Tamil & 100\% & 6\% & 6.83 & 2.70$\times$ & 1.41$\times$ & 20.14 \\
+Tesla T4, $g$ = 32 & English & 42\% & 3\% & 2.04 & 1.86$\times$ & 1.84$\times$ & 0.03 \\
+Tesla T4, $g$ = 32 & Hindi & 94\% & 4\% & 9.01 & 7.21$\times$ & 6.53$\times$ & 0.06 \\
+Tesla T4, $g$ = 32 & Marathi & 95\% & 7\% & 8.70 & 6.81$\times$ & 5.88$\times$ & 0.09 \\
+Tesla T4, $g$ = 32 & Bengali & 97\% & 7\% & 9.73 & 7.82$\times$ & 6.49$\times$ & 0.10 \\
+Tesla T4, $g$ = 32 & Tamil & 98\% & 12\% & 8.36 & 6.53$\times$ & 5.23$\times$ & 0.15 \\
 \bottomrule
 \end{tabular}
 \end{table}
 Our proposal predicted that more pieces per word would make tokens harder to guess and lower acceptance. The opposite happened (Table 8, Figure 6). Two effects combine. The 0.5B model largely copies the article when summarising in these languages: 92\%--100\% of its 4-token sequences come from the article, against about half in English, while self-repetition stays low. And each copied word is many tokens long, so a single correct guess of a word yields many tokens at once.
 
-How much of that gain survives end to end depends on how fast the device reads the prompt. On the Tesla T4, generation alone became 7.47$\times$--10.16$\times$ faster for the Indian languages and whole requests 5.63$\times$--8.55$\times$ faster. On the Intel Core i7-8550U, generation alone was 2.73$\times$--3.92$\times$ faster, but whole requests only 1.42$\times$--1.90$\times$. Reading a Tamil prompt takes 20.1 s of a 39.6 s request on the CPU but 0.15 s on the GPU. Fine-grained tokenization thus helps acceptance and hurts prefill, and the hardware decides which effect dominates.
+How much of that gain survives end to end depends on how fast the device reads the prompt. On the Tesla T4, generation alone became 6.53$\times$--7.82$\times$ faster for the Indian languages and whole requests 5.23$\times$--6.53$\times$ faster. On the Intel Core i7-8550U, generation alone was 2.70$\times$--3.69$\times$ faster, but whole requests only 1.41$\times$--1.88$\times$. Reading a Tamil prompt takes 20.1 s of a 39.6 s request on the CPU but 0.15 s on the GPU. Fine-grained tokenization thus helps acceptance and hurts prefill, and the hardware decides which effect dominates.
 
 The model's summaries in these languages are of low quality and heavily extractive. Decoding is lossless, so this does not affect the speed comparison, but a larger model that paraphrases more would likely accept fewer drafted tokens.
 
 \begin{figure}[tbp]
 \centering
 \includegraphics[width=1.00\linewidth]{fig5_language.png}
-\caption{Languages. Left: tokens per word for two tokenizers. Middle: $\tau$ at each device's calibrated draft size. Right: speedup at that draft size, end to end (solid) and generation only (dashed).}
+\caption{Languages. Left: tokens per word for two tokenizers. Middle: $\tau$ at the draft size used on each device. Right: speedup at that draft size, end to end (solid) and generation only (dashed).}
 \end{figure}
 \subsection{Sustained load}
 \begin{table}[tbp]
@@ -390,37 +394,38 @@ The model's summaries in these languages are of low quality and heavily extracti
 \bottomrule
 \end{tabular}
 \end{table}
-Over 20 minutes of continuous work on the plugged-in Intel Core i7-8550U CPU, pass times and the speedup at the calibrated $g$ = 14 showed no downward trend: the per-cycle speedup stayed between 1.45$\times$ and 1.51$\times$ (Table 9, Figure 7). The raw per-round speedup varies between about 1.0$\times$ and 2.1$\times$, but that is the articles taking turns, which is why the table averages over full cycles.
+Over 20 minutes of continuous work on the plugged-in Intel Core i7-8550U CPU, pass times and the speedup at $g$ = 14 showed no further downward trend: the mean speedup per cycle stayed between 1.45$\times$ and 1.51$\times$ (Table 9, Figure 7). This test cannot rule out throttling, because it did not start from a cool machine: it followed more than an hour of benchmarks, and its one-token pass already took 155 ms in the first cycle, against 130 ms in the profile measured near the start of the session. The slow-down may have happened before the test began. The raw per-round speedup varies between about 1.0$\times$ and 2.1$\times$, but that is the articles taking turns, which is why the table averages over full cycles.
 
-Power state mattered more than heat. In a separate short run on battery power the same laptop needed about 197 ms per normal pass instead of 124 ms. A draft size calibrated on mains power is then applied to a different cost curve, which is the kind of instability UniSpec's limitations anticipate. Our software therefore detects battery operation and stores such runs separately.
+Power state also matters. In one short informal run on battery, with other programs open, a normal pass took about 197 ms, against 134 ms in the same short run on mains power (47\% slower). It was not repeated, so it is an indication only, but it is the kind of instability UniSpec's limitations anticipate: a draft size calibrated in one state is then applied to a different cost curve. Our software therefore detects battery operation and stores such runs separately.
 
 \begin{figure}[tbp]
 \centering
 \includegraphics[width=1.00\linewidth]{fig6_thermal.png}
-\caption{Sustained load. Left: one-token and $(1+g^*)$-token pass times over 20 minutes. Right: speedup at the calibrated $g^*$, averaged per cycle of held-out articles.}
+\caption{Sustained load. Left: one-token and $(1+g^*)$-token pass times over 20 minutes. Right: speedup at the draft size shown, averaged per cycle of held-out articles.}
 \end{figure}
 \section{Discussion}
 \textbf{The shared rule holds and its split is practical.} Acceptance matched across a 32-bit CPU and a 16-bit GPU, so $\tau$ can be measured once on any machine and only the latency curve, a two-minute measurement, has to be repeated per device. This is the practical value of PPD's decomposition for anyone without long access to the target hardware.
 
-\textbf{Everyday hardware sits at the far end of the cost curve.} UniSpec observes smaller optimal draft sizes on consumer GPUs than on data-centre GPUs. The laptop CPU extends that trend: beyond the first extra token, verification cost grows almost linearly with the draft size, the optimum falls to around 8--16, and a draft size suited to a GPU loses 14\% and can make individual requests slower than no speculation at all. The free T4, in contrast, still had idle capacity at $g$ = 128, because a 0.5B model leaves it memory-bound; with UniSpec's 8B--14B models its optimum would be lower.
+\textbf{The draft size matters most on the weakest hardware.} UniSpec observes smaller optimal draft sizes on consumer GPUs than on data-centre GPUs. The laptop CPU extends that trend: every verified token costs time, the optimum is small ($g$ = 8), and the largest size tested loses 17\% and makes individual requests slower than no speculation. On the T4 the choice hardly matters above about 12, because a 0.5B model leaves it memory-bound and acceptance has already saturated; with UniSpec's 8B--14B models verification would cost more and a sharper optimum is likely.
 
-\textbf{Calibration selects well but predicts poorly.} Because the speedup curves are flat near their optimum, every reasonable method chose a draft size close to the best. The predicted speedups, however, ranged from 14\% too high to 2.7 times the measured value, because acceptance depends on how much each input is copied and a handful of calibration articles does not represent that well. A deployment should calibrate on inputs typical of its own workload and treat the predicted speedup as an upper estimate.
+\textbf{Calibration works when its inputs are representative.} On the CPU the fit chose the best tested size and predicted the speedup almost exactly. On the GPU it over-predicted, because its calibration articles copied more than the held-out ones. A deployment should calibrate on inputs typical of its own workload. How results are averaged matters as much: means of per-article ratios were dominated by one article and would have suggested that the GPU keeps improving up to the largest draft size.
 
-\textbf{Profile-only calibration needs repeated measurements on shared hardware.} The PPD split rests on a single synthetic latency profile. On a shared cloud GPU, transient slowdowns in a few readings moved its choice from the largest draft size to $g$ = 7. Repeating the profile and taking the median per size, or timing real decoding as UniSpec does, avoids this.
+\textbf{Profile-only calibration needs repeated measurements on shared hardware.} The PPD split rests on a single synthetic latency profile, and a few slow readings in it moved the extended GPU run's choice to $g$ = 7 or 8. Repeating the profile at different times, or timing real decoding as UniSpec does, would guard against this.
 
-\textbf{Tokenization decides the language result.} Fine-grained tokenization of Indian scripts is not a barrier to n-gram speculation: copied words become long, easily guessed runs of tokens. It is a barrier to latency on devices with slow prefill, because the same text costs several times more tokens to read. A tokenizer built for these languages, such as Sarvam-1's, would shorten prompts by a similar factor and remove most of that cost.
+\textbf{Tokenization decides the language result.} Fine-grained tokenization of Indian scripts is not a barrier to n-gram speculation: copied words become long, easily guessed runs of tokens. It is a barrier to latency on devices with slow prefill, because the same text costs several times more tokens to read. A tokenizer built for these languages, such as Sarvam-1's, could shorten prompts considerably, though a different tokenizer means a different model.
 
 \section{Limitations}
 \begin{itemize}
   \item \textbf{Simplified UniSpec.} A single chain of drafted tokens replaces confidence-scored draft trees; we evaluate UniSpec's calibration, not its full drafter, so absolute speedups are not comparable with the paper.
   \item \textbf{No PPD drafter.} Its prompt-token embeddings require GPU training beyond our budget.
-  \item \textbf{One small model.} Qwen2.5-0.5B is far smaller than the papers' 7B--14B models. Larger models load the GPU more and would lower its optimal draft size; on a CPU they would make every pass slower.
+  \item \textbf{One small model.} Qwen2.5-0.5B is smaller than the papers' models (1.4B to 14B). Larger models load the GPU more and would probably lower its optimal draft size; on a CPU they would make every pass slower.
   \item \textbf{Few devices.} 2 devices so far. The benchmark runs unchanged on further CPUs and GPUs, and their results join every table and figure of this report on rebuilding.
   \item \textbf{Timing noise.} Laptop and shared-GPU timings are noisier than dedicated servers. Paired back-to-back runs, held-out articles and single-session comparisons reduce this, but differences below about 5\% should not be over-interpreted.
+  \item \textbf{Small samples.} The CPU sweep uses 12 English articles and one run each, the language study five articles per language on the CPU; a single unusual article can move an average.
   \item \textbf{Indian-language quality.} The small model copies heavily in these languages; acceptance is likely lower with stronger models.
 \end{itemize}
 \section{Conclusion}
-The hardware-aware rule shared by UniSpec and PPD transfers to everyday hardware: acceptance is device-independent, latency is not, and measuring latency per device selects a good draft size. The optimal draft size differs by an order of magnitude between a laptop CPU (8) and a free cloud GPU (128 or more), and using the wrong one costs 6--14\% on average and can make individual requests slower than normal decoding. Calibration chooses well but over-promises, because the gain depends as much on how much the output copies its input as on the hardware. In Indian languages, fine-grained tokenization raises acceptance, up to 8.55$\times$ end to end on the GPU, but lengthens prompts so much that on a CPU reading them limits the gain to 1.42$\times$--1.90$\times$.
+The hardware-aware rule shared by UniSpec and PPD transfers to everyday hardware: acceptance is device-independent, latency is not, and measuring latency per device selects a good draft size. On a laptop CPU the choice matters: the best tested size is 8 (1.53$\times$), a GPU's setting costs 8\% and the largest tested size 17\%, and individual requests can become slower than normal decoding. On a free cloud GPU the curve is flat beyond about 12 (2.11$\times$ to 2.23$\times$), so a wrong choice costs little. UniSpec-style calibration finds the CPU's best tested size and predicts its speedup closely when calibration inputs resemble the real ones. In Indian languages, fine-grained tokenization raises acceptance, up to 6.53$\times$ end to end on the GPU, but lengthens prompts so much that on a CPU reading them limits the gain to 1.41$\times$--1.88$\times$.
 
 \begin{thebibliography}{99}
 \addcontentsline{toc}{section}{References}
@@ -451,69 +456,69 @@ The hardware-aware rule shared by UniSpec and PPD transfers to everyday hardware
 \begin{table}[H]
 \centering
 \small
-\caption{Draft-size sweep on the Intel Core i7-8550U CPU, all articles ($g$ = 0 is normal decoding).}
+\caption{Draft-size sweep on the Intel Core i7-8550U CPU, all articles ($g$ = 0 is normal decoding). Speedup and generation-only use total time; mean, median and max are over per-article end-to-end speedups.}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{L{0.99cm}L{1.25cm}L{1.61cm}L{2.06cm}L{2.06cm}L{1.70cm}L{2.33cm}L{1.88cm}}
+\begin{tabular}{L{0.81cm}L{0.90cm}L{1.54cm}L{1.36cm}L{1.17cm}L{1.45cm}L{1.26cm}L{1.08cm}L{1.26cm}L{1.08cm}L{1.08cm}}
 \toprule
-\textbf{$g$} & \textbf{$\tau$} & \textbf{Accepted} & \textbf{Tokens per pass} & \textbf{Pass time (ms)} & \textbf{Speedup} & \textbf{Generation-only} & \textbf{Exact match} \\
+\textbf{$g$} & \textbf{$\tau$} & \textbf{Accepted} & \textbf{Tokens per pass} & \textbf{Pass (ms)} & \textbf{Speedup} & \textbf{Gen. only} & \textbf{Mean} & \textbf{Median} & \textbf{Max} & \textbf{Exact} \\
 \midrule
-0 & 1.00 & 0\% & 1.0 & 124.3 & 1.00$\times$ & 1.00$\times$ & 100\% \\
-1 & 1.48 & 75\% & 1.6 & 156.3 & 1.15$\times$ & 1.17$\times$ & 100\% \\
-2 & 1.79 & 67\% & 2.1 & 154.5 & 1.34$\times$ & 1.43$\times$ & 100\% \\
-3 & 2.01 & 60\% & 2.5 & 157.8 & 1.43$\times$ & 1.57$\times$ & 100\% \\
-4 & 2.19 & 56\% & 2.9 & 158.7 & 1.51$\times$ & 1.70$\times$ & 100\% \\
-6 & 2.46 & 47\% & 3.7 & 162.8 & 1.59$\times$ & 1.84$\times$ & 100\% \\
-8 & 2.60 & 41\% & 4.4 & 168.5 & 1.62$\times$ & 1.85$\times$ & 100\% \\
-12 & 2.84 & 34\% & 5.7 & 181.4 & 1.61$\times$ & 1.88$\times$ & 100\% \\
-16 & 3.00 & 28\% & 7.1 & 187.2 & 1.61$\times$ & 1.91$\times$ & 100\% \\
-24 & 3.19 & 22\% & 9.4 & 212.8 & 1.52$\times$ & 1.78$\times$ & 100\% \\
-32 & 3.25 & 18\% & 11.8 & 231.1 & 1.44$\times$ & 1.66$\times$ & 100\% \\
+0 & 1.00 & 0\% & 1.0 & 124.4 & 1.00$\times$ & 1.00$\times$ & 1.00$\times$ & 1.00$\times$ & 1.0$\times$ & 100\% \\
+1 & 1.46 & 78\% & 1.6 & 155.2 & 1.14$\times$ & 1.17$\times$ & 1.15$\times$ & 1.12$\times$ & 1.3$\times$ & 100\% \\
+2 & 1.71 & 69\% & 2.0 & 152.7 & 1.32$\times$ & 1.39$\times$ & 1.34$\times$ & 1.31$\times$ & 1.7$\times$ & 100\% \\
+3 & 1.86 & 61\% & 2.4 & 155.8 & 1.39$\times$ & 1.49$\times$ & 1.43$\times$ & 1.34$\times$ & 2.1$\times$ & 100\% \\
+4 & 1.98 & 56\% & 2.8 & 156.9 & 1.45$\times$ & 1.57$\times$ & 1.51$\times$ & 1.38$\times$ & 2.3$\times$ & 100\% \\
+6 & 2.10 & 46\% & 3.4 & 159.0 & 1.49$\times$ & 1.64$\times$ & 1.59$\times$ & 1.38$\times$ & 2.5$\times$ & 100\% \\
+8 & 2.18 & 39\% & 4.0 & 161.6 & 1.53$\times$ & 1.68$\times$ & 1.62$\times$ & 1.45$\times$ & 2.5$\times$ & 100\% \\
+12 & 2.26 & 30\% & 5.2 & 173.9 & 1.48$\times$ & 1.62$\times$ & 1.61$\times$ & 1.39$\times$ & 3.0$\times$ & 100\% \\
+16 & 2.30 & 24\% & 6.4 & 179.4 & 1.47$\times$ & 1.60$\times$ & 1.61$\times$ & 1.37$\times$ & 2.9$\times$ & 100\% \\
+24 & 2.35 & 18\% & 8.5 & 203.2 & 1.35$\times$ & 1.44$\times$ & 1.52$\times$ & 1.29$\times$ & 3.1$\times$ & 100\% \\
+32 & 2.36 & 14\% & 10.6 & 219.3 & 1.27$\times$ & 1.34$\times$ & 1.44$\times$ & 1.20$\times$ & 3.0$\times$ & 100\% \\
 \bottomrule
 \end{tabular}
 \end{table}
 \begin{table}[H]
 \centering
 \small
-\caption{Draft-size sweep on the Tesla T4 GPU, all articles ($g$ = 0 is normal decoding).}
+\caption{Draft-size sweep on the Tesla T4 GPU, all articles ($g$ = 0 is normal decoding). Speedup and generation-only use total time; mean, median and max are over per-article end-to-end speedups.}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{L{0.99cm}L{1.25cm}L{1.61cm}L{2.06cm}L{2.06cm}L{1.70cm}L{2.33cm}L{1.88cm}}
+\begin{tabular}{L{0.81cm}L{0.90cm}L{1.54cm}L{1.36cm}L{1.17cm}L{1.45cm}L{1.26cm}L{1.08cm}L{1.26cm}L{1.08cm}L{1.08cm}}
 \toprule
-\textbf{$g$} & \textbf{$\tau$} & \textbf{Accepted} & \textbf{Tokens per pass} & \textbf{Pass time (ms)} & \textbf{Speedup} & \textbf{Generation-only} & \textbf{Exact match} \\
+\textbf{$g$} & \textbf{$\tau$} & \textbf{Accepted} & \textbf{Tokens per pass} & \textbf{Pass (ms)} & \textbf{Speedup} & \textbf{Gen. only} & \textbf{Mean} & \textbf{Median} & \textbf{Max} & \textbf{Exact} \\
 \midrule
-0 & 1.00 & 0\% & 1.0 & 26.2 & 1.00$\times$ & 1.00$\times$ & 100\% \\
-1 & 1.47 & 75\% & 1.6 & 28.8 & 1.33$\times$ & 1.33$\times$ & 93\% \\
-2 & 1.77 & 65\% & 2.1 & 28.7 & 1.60$\times$ & 1.61$\times$ & 90\% \\
-3 & 2.00 & 59\% & 2.5 & 28.0 & 1.84$\times$ & 1.85$\times$ & 90\% \\
-4 & 2.18 & 54\% & 2.9 & 28.6 & 1.95$\times$ & 1.97$\times$ & 90\% \\
-6 & 2.46 & 46\% & 3.7 & 27.8 & 2.25$\times$ & 2.28$\times$ & 90\% \\
-8 & 2.65 & 40\% & 4.4 & 28.9 & 2.31$\times$ & 2.35$\times$ & 90\% \\
-12 & 2.94 & 33\% & 5.8 & 27.8 & 2.66$\times$ & 2.72$\times$ & 90\% \\
-16 & 3.16 & 28\% & 7.2 & 29.1 & 2.73$\times$ & 2.81$\times$ & 93\% \\
-24 & 3.45 & 23\% & 9.7 & 28.9 & 2.94$\times$ & 3.06$\times$ & 93\% \\
-32 & 3.74 & 19\% & 12.1 & 29.0 & 3.17$\times$ & 3.34$\times$ & 97\% \\
+0 & 1.00 & 0\% & 1.0 & 26.0 & 1.00$\times$ & 1.00$\times$ & 1.00$\times$ & 1.00$\times$ & 1.0$\times$ & 100\% \\
+1 & 1.46 & 77\% & 1.6 & 28.8 & 1.31$\times$ & 1.31$\times$ & 1.33$\times$ & 1.30$\times$ & 1.8$\times$ & 93\% \\
+2 & 1.70 & 67\% & 2.0 & 28.6 & 1.54$\times$ & 1.54$\times$ & 1.60$\times$ & 1.56$\times$ & 2.6$\times$ & 90\% \\
+3 & 1.87 & 61\% & 2.4 & 27.8 & 1.73$\times$ & 1.74$\times$ & 1.84$\times$ & 1.66$\times$ & 3.2$\times$ & 90\% \\
+4 & 1.98 & 55\% & 2.8 & 28.4 & 1.79$\times$ & 1.81$\times$ & 1.95$\times$ & 1.75$\times$ & 4.0$\times$ & 90\% \\
+6 & 2.10 & 45\% & 3.4 & 27.6 & 1.96$\times$ & 1.98$\times$ & 2.25$\times$ & 1.86$\times$ & 5.7$\times$ & 90\% \\
+8 & 2.18 & 39\% & 4.1 & 28.4 & 1.97$\times$ & 1.99$\times$ & 2.31$\times$ & 1.97$\times$ & 5.7$\times$ & 90\% \\
+12 & 2.27 & 30\% & 5.3 & 27.5 & 2.11$\times$ & 2.14$\times$ & 2.66$\times$ & 2.05$\times$ & 9.4$\times$ & 90\% \\
+16 & 2.35 & 24\% & 6.5 & 28.8 & 2.09$\times$ & 2.11$\times$ & 2.73$\times$ & 1.92$\times$ & 11.2$\times$ & 93\% \\
+24 & 2.39 & 18\% & 8.8 & 28.3 & 2.16$\times$ & 2.19$\times$ & 2.94$\times$ & 2.09$\times$ & 14.7$\times$ & 93\% \\
+32 & 2.39 & 14\% & 10.9 & 28.7 & 2.14$\times$ & 2.16$\times$ & 3.17$\times$ & 2.10$\times$ & 19.2$\times$ & 97\% \\
 \bottomrule
 \end{tabular}
 \end{table}
 \begin{table}[H]
 \centering
 \small
-\caption{Draft-size sweep on the Tesla T4 GPU (extended sweep), all articles ($g$ = 0 is normal decoding).}
+\caption{Draft-size sweep on the Tesla T4 GPU (extended sweep), all articles ($g$ = 0 is normal decoding). Speedup and generation-only use total time; mean, median and max are over per-article end-to-end speedups.}
 \setlength{\tabcolsep}{4pt}
-\begin{tabular}{L{0.99cm}L{1.25cm}L{1.61cm}L{2.06cm}L{2.06cm}L{1.70cm}L{2.33cm}L{1.88cm}}
+\begin{tabular}{L{0.81cm}L{0.90cm}L{1.54cm}L{1.36cm}L{1.17cm}L{1.45cm}L{1.26cm}L{1.08cm}L{1.26cm}L{1.08cm}L{1.08cm}}
 \toprule
-\textbf{$g$} & \textbf{$\tau$} & \textbf{Accepted} & \textbf{Tokens per pass} & \textbf{Pass time (ms)} & \textbf{Speedup} & \textbf{Generation-only} & \textbf{Exact match} \\
+\textbf{$g$} & \textbf{$\tau$} & \textbf{Accepted} & \textbf{Tokens per pass} & \textbf{Pass (ms)} & \textbf{Speedup} & \textbf{Gen. only} & \textbf{Mean} & \textbf{Median} & \textbf{Max} & \textbf{Exact} \\
 \midrule
-0 & 1.00 & 0\% & 1.0 & 26.3 & 1.00$\times$ & 1.00$\times$ & 100\% \\
-1 & 1.47 & 75\% & 1.6 & 28.5 & 1.34$\times$ & 1.35$\times$ & 93\% \\
-2 & 1.77 & 65\% & 2.1 & 28.8 & 1.60$\times$ & 1.61$\times$ & 90\% \\
-4 & 2.18 & 54\% & 2.9 & 29.0 & 1.94$\times$ & 1.96$\times$ & 90\% \\
-8 & 2.65 & 40\% & 4.4 & 27.8 & 2.42$\times$ & 2.47$\times$ & 90\% \\
-16 & 3.16 & 28\% & 7.2 & 28.4 & 2.79$\times$ & 2.87$\times$ & 93\% \\
-32 & 3.74 & 19\% & 12.1 & 28.1 & 3.26$\times$ & 3.43$\times$ & 97\% \\
-48 & 4.03 & 15\% & 16.1 & 28.6 & 3.38$\times$ & 3.63$\times$ & 93\% \\
-64 & 4.42 & 13\% & 19.7 & 28.7 & 3.56$\times$ & 3.92$\times$ & 90\% \\
-96 & 4.48 & 11\% & 24.6 & 28.1 & 3.72$\times$ & 4.11$\times$ & 90\% \\
-128 & 5.22 & 10\% & 27.3 & 28.3 & 4.10$\times$ & 4.88$\times$ & 93\% \\
+0 & 1.00 & 0\% & 1.0 & 26.3 & 1.00$\times$ & 1.00$\times$ & 1.00$\times$ & 1.00$\times$ & 1.0$\times$ & 100\% \\
+1 & 1.46 & 77\% & 1.6 & 28.6 & 1.33$\times$ & 1.34$\times$ & 1.34$\times$ & 1.33$\times$ & 1.7$\times$ & 93\% \\
+2 & 1.70 & 67\% & 2.0 & 28.8 & 1.54$\times$ & 1.55$\times$ & 1.60$\times$ & 1.56$\times$ & 2.5$\times$ & 90\% \\
+4 & 1.98 & 55\% & 2.8 & 28.5 & 1.80$\times$ & 1.81$\times$ & 1.94$\times$ & 1.75$\times$ & 4.0$\times$ & 90\% \\
+8 & 2.18 & 39\% & 4.1 & 27.6 & 2.05$\times$ & 2.07$\times$ & 2.42$\times$ & 1.87$\times$ & 7.0$\times$ & 90\% \\
+16 & 2.35 & 24\% & 6.5 & 28.3 & 2.15$\times$ & 2.17$\times$ & 2.79$\times$ & 1.99$\times$ & 11.3$\times$ & 93\% \\
+32 & 2.39 & 14\% & 10.9 & 27.9 & 2.21$\times$ & 2.24$\times$ & 3.26$\times$ & 2.21$\times$ & 19.4$\times$ & 97\% \\
+48 & 2.38 & 10\% & 14.5 & 28.2 & 2.18$\times$ & 2.21$\times$ & 3.38$\times$ & 2.11$\times$ & 22.1$\times$ & 93\% \\
+64 & 2.40 & 8\% & 17.6 & 28.2 & 2.20$\times$ & 2.23$\times$ & 3.56$\times$ & 2.13$\times$ & 28.2$\times$ & 90\% \\
+96 & 2.41 & 7\% & 21.8 & 27.9 & 2.23$\times$ & 2.26$\times$ & 3.72$\times$ & 2.18$\times$ & 30.5$\times$ & 90\% \\
+128 & 2.41 & 6\% & 23.2 & 28.4 & 2.20$\times$ & 2.23$\times$ & 4.10$\times$ & 2.04$\times$ & 39.8$\times$ & 93\% \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -527,9 +532,9 @@ The hardware-aware rule shared by UniSpec and PPD transfers to everyday hardware
 \toprule
 \textbf{Run} & \textbf{$a$} & \textbf{$b$} & \textbf{$c_0$ (ms)} & \textbf{$c_1$ (ms)} & \textbf{$c_2$ (ms)} & \textbf{Continuous $g^*$} & \textbf{Integer $g^*$} \\
 \midrule
-Intel Core i7-8550U CPU & 2.71 & 6.46 & 152.53 & 2.922 & -0.00553 & 13.9 & 14 \\
-Tesla T4 GPU & 3.76 & 9.29 & 28.22 & 0.082 & -0.00154 & 32.0 & 32 \\
-Tesla T4 GPU (extended sweep) & 5.81 & 25.13 & 28.73 & -0.009 & 0.00002 & 128.0 & 128 \\
+Intel Core i7-8550U CPU & 1.34 & 2.86 & 151.92 & 1.866 & 0.01340 & 8.1 & 8 \\
+Tesla T4 GPU & 1.69 & 3.54 & 28.25 & 0.010 & 0.00044 & 18.6 & 19 \\
+Tesla T4 GPU (extended sweep) & 1.74 & 3.65 & 28.55 & -0.015 & 0.00007 & 108.0 & 108 \\
 \bottomrule
 \end{tabular}
 \end{table}

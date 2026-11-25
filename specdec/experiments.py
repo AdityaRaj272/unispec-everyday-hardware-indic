@@ -159,18 +159,42 @@ def run_paired(ctx: Ctx, prompts: List[Dict], gs: List[int], repeats: int, tag: 
 
 
 def aggregate(rows: List[Dict], split: Optional[str] = None) -> Dict[int, Dict]:
-    """Per-g averages. Speedups are averaged per prompt (paired ratios)."""
+    """Per-g totals over all prompts: speedup is total baseline time over total
+    speculative time, and tau is total tokens over total passes (Eq. 1). Averaging
+    per-prompt ratios instead lets one prompt that is copied word for word dominate;
+    the per-prompt mean, median and maximum are kept for reference."""
     out: Dict[int, Dict] = {}
     for g in sorted({r["g"] for r in rows}):
         rs = [r for r in rows if r["g"] == g and (split is None or r["split"] == split)]
         if not rs:
             continue
-        keys = ("tau", "acceptance_rate", "mean_pass_sec", "mean_pass_len", "speedup",
-                "decode_speedup", "exact_match", "latency_sec", "prefill_sec", "draft_sec",
-                "n_tokens", "copy_from_prompt", "self_repeat")
-        out[g] = {k: float(np.mean([r[k] for r in rs])) for k in keys if all(k in r for r in rs)}
-        out[g]["n"] = len(rs)
+        passes = sum(r["forward_passes"] for r in rs)
+        drafted = sum(r["drafted"] for r in rs)
+        v = {
+            "tau": sum(r["n_tokens"] - 1 for r in rs) / passes,
+            "acceptance_rate": sum(r["accepted"] for r in rs) / drafted if drafted else 0.0,
+            "mean_pass_sec": sum(r["mean_pass_sec"] * r["forward_passes"] for r in rs) / passes,
+            "mean_pass_len": sum(r["mean_pass_len"] * r["forward_passes"] for r in rs) / passes,
+            "speedup": 1.0, "decode_speedup": 1.0,
+        }
+        if g > 0:
+            v["speedup"] = sum(r["base_latency_sec"] for r in rs) / sum(r["latency_sec"] for r in rs)
+            v["decode_speedup"] = sum(r["base_decode_sec"] for r in rs) / sum(r["decode_sec"] for r in rs)
+        sp = [r["speedup"] for r in rs]
+        v.update(speedup_mean=float(np.mean(sp)), speedup_median=float(np.median(sp)), speedup_max=float(max(sp)))
+        for k in ("exact_match", "latency_sec", "prefill_sec", "draft_sec", "n_tokens",
+                  "copy_from_prompt", "self_repeat"):
+            if all(k in r for r in rs):
+                v[k] = float(np.mean([r[k] for r in rs]))
+        v["n"] = len(rs)
+        out[g] = v
     return out
+
+
+def speedup_at(agg: Dict[int, Dict], g: float, key: str = "speedup") -> float:
+    """Read a speedup off the sweep, interpolating in log2(g) between tested sizes."""
+    gs = sorted(x for x in agg if x > 0)
+    return float(np.interp(np.log2(g), np.log2(gs), [agg[x][key] for x in gs]))
 
 
 # --------------------------------------------------------------------------
@@ -305,7 +329,7 @@ def calibrate(ctx: Ctx) -> Dict:
     prof_curve = _profile_at(prof, typical_ctx)
 
     choices = {
-        "grid": cal.grid_optimum(gs, [calib[g]["speedup"] for g in gs]),
+        "grid": cal.grid_optimum(gs, [calib[g]["decode_speedup"] for g in gs]),
         "unispec": cal.unispec_optimum(gs, taus, [calib[g]["mean_pass_sec"] for g in gs], base_pass),
         "ppd_split": cal.ppd_split_optimum(gs, taus, lens, prof_curve),
     }
@@ -316,31 +340,19 @@ def calibrate(ctx: Ctx) -> Dict:
         choices[f"ppd_split_tau_from:{dev}"] = cal.ppd_split_optimum(
             ogs, [oc[g]["tau"] for g in ogs], [oc[g]["mean_pass_len"] for g in ogs], prof_curve)
 
-    # Held-out check: measured speedup at each chosen g on the eval prompts.
-    # If any chosen g is not in the sweep grid, ALL chosen g are re-measured
-    # together in one session, so no choice is compared against numbers taken
-    # under different machine conditions (e.g. another day, or on battery).
-    sweep_ev = aggregate([r for r in rows if r["split"] == "eval"])
-    chosen = sorted({ch["g_star"] for ch in choices.values()})
-    extra_rows = []
-    if set(chosen) - set(sweep_ev):
-        print(f"  measuring g={chosen} together on held-out prompts (some are not in the sweep grid)")
-        prompts = load_prompts("english", "eval", ctx.cfg["n_eval"])
-        extra_rows = run_paired(ctx, prompts, chosen, ctx.cfg["repeats"], "held-out")
-        ev = aggregate(extra_rows)
-    else:
-        ev = sweep_ev
+    # Held-out check: every choice is read off the same sweep session on the eval
+    # prompts, so no choice is compared across machine conditions. The models
+    # predict the decode phase, so that is what they are compared with.
+    ev = aggregate([r for r in rows if r["split"] == "eval"])
     for name, ch in choices.items():
-        e = ev[ch["g_star"]]
-        ch.update(heldout_speedup=e["speedup"], heldout_decode_speedup=e["decode_speedup"])
+        ch.update(heldout_speedup=speedup_at(ev, ch["g_star"]),
+                  heldout_decode_speedup=speedup_at(ev, ch["g_star"], "decode_speedup"))
         print(f"  {name:40s} g*={ch['g_star']:3d}  predicted {ch['pred_speedup']:.2f}x  "
-              f"held-out {e['speedup']:.2f}x (decode {e['decode_speedup']:.2f}x)")
-    best_eval = max((g for g in sweep_ev if g > 0), key=lambda g: sweep_ev[g]["speedup"])
-    out = {"choices": choices, "typical_ctx": typical_ctx, "calib_agg": calib,
-           "eval_agg": ev, "sweep_eval_agg": sweep_ev, "eval_best_g": best_eval,
-           "extra_rows": extra_rows, "g_star": choices["unispec"]["g_star"]}
-    print(f"  best grid g on held-out prompts in the sweep (hindsight): {best_eval} -> "
-          f"{sweep_ev[best_eval]['speedup']:.2f}x")
+              f"held-out decode {ch['heldout_decode_speedup']:.2f}x (end to end {ch['heldout_speedup']:.2f}x)")
+    best_eval = max((g for g in ev if g > 0), key=lambda g: ev[g]["speedup"])
+    out = {"choices": choices, "typical_ctx": typical_ctx, "calib_agg": calib, "eval_agg": ev,
+           "eval_best_g": best_eval, "g_star": choices["unispec"]["g_star"]}
+    print(f"  best tested g on held-out prompts (hindsight): {best_eval} -> {ev[best_eval]['speedup']:.2f}x")
     ctx.save("calibration", out)
     return out
 
