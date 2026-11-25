@@ -1,0 +1,164 @@
+{
+ "device": {
+  "device": "cuda:0",
+  "dtype": "float16",
+  "os": "Windows 11",
+  "cpu": "AMD Ryzen 7 5800H with Radeon Graphics",
+  "cpu_cores": 16,
+  "torch_threads": 8,
+  "torch": "2.13.0+cu126",
+  "transformers": "5.15.1",
+  "python": "3.14.3",
+  "ram_gb": 15.4,
+  "physical_cores": 8,
+  "on_battery": false,
+  "gpu": "NVIDIA GeForce RTX 3060 Laptop GPU",
+  "gpu_capability": "8.6",
+  "gpu_vram_gb": 6.0,
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "preset": "cpu"
+ },
+ "config": {
+  "max_new": 128,
+  "n_calib": 6,
+  "n_eval": 6,
+  "repeats": 1,
+  "grid": [
+   1,
+   2,
+   3,
+   4,
+   6,
+   8,
+   12,
+   16,
+   24,
+   32
+  ],
+  "profile_ctx": [
+   512,
+   1024,
+   2048
+  ],
+  "profile_n": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   7,
+   9,
+   13,
+   17,
+   25,
+   33
+  ],
+  "profile_reps": 7,
+  "n_correct": 4,
+  "lang_n": 5,
+  "lang_grid": [
+   4,
+   8
+  ],
+  "thermal_min": 20.0
+ },
+ "exact_match_rate": 1.0,
+ "runs": [
+  {
+   "prompt_id": "en-00",
+   "g": 2,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-00",
+   "g": 8,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-00",
+   "g": 32,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-01",
+   "g": 2,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-01",
+   "g": 8,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-01",
+   "g": 32,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-02",
+   "g": 2,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-02",
+   "g": 8,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-02",
+   "g": 32,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-03",
+   "g": 2,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 102,
+   "matching_prefix": 102
+  },
+  {
+   "prompt_id": "en-03",
+   "g": 8,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 102,
+   "matching_prefix": 102
+  },
+  {
+   "prompt_id": "en-03",
+   "g": 32,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 102,
+   "matching_prefix": 102
+  }
+ ]
+}

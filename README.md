@@ -59,7 +59,7 @@ see **[results/SUMMARY.md](results/SUMMARY.md)** for every number.
 | ![](figures/fig5_language.png) | ![](figures/fig6_thermal.png) |
 | ![](figures/fig7_copying_vs_speedup.png) | |
 
-### Findings so far (laptop CPU: Intel i7-8550U, fp32 · laptop GPU: Apple M1, fp16 · free GPU: Tesla T4, fp16)
+### Findings so far (laptop CPU: Intel i7-8550U, fp32 · laptop GPUs: Apple M1 and RTX 3060, fp16 · free GPU: Tesla T4, fp16)
 
 * **Lossless:** 100% identical output on the CPU. On the 16-bit GPUs, 92% (M1) and 100% (T4) in the correctness
   check and 83–100% across the sweeps; the rest diverge at fp16 near-ties between two almost equally likely tokens
@@ -75,22 +75,24 @@ see **[results/SUMMARY.md](results/SUMMARY.md)** for every number.
   articles were slower than no guessing (0.86–0.98×). The T4 reaches 2.11× at g = 12 and then stays flat
   up to g = 128 (2.20×): a 129-token pass still costs about 1.5× a one-token pass at most, but acceptance
   has saturated. Per-article *averages* would suggest 4.10× at g = 128, but one article copied word for word
-  (39.8×) causes that; the median is 2.04×. The M1 behaves like the CPU: **1.71× at g = 8**, 1.41× at g = 32.
+  (39.8×) causes that; the median is 2.04×. The M1 behaves like the CPU: **1.71× at g = 8**, 1.41× at g = 32. The RTX 3060 laptop GPU behaves like the T4
+  (flat pass time, 2.29× at g = 32), though its passes are slow (about 60 ms) and noisy.
 * **Cost of the wrong g (held-out articles):** the CPU loses 8% with the T4's calibrated g = 19 and 17% with
-  g = 32; the M1 loses 13% and 19%; the T4 loses 4–5% with the laptops' g = 8.
+  g = 32; the M1 loses 13% and 19%; the T4 loses 4–5% with g = 8.
 * **Calibration:** on the CPU, UniSpec's fit and grid search both pick g = 8, the best tested size, and the fit
   predicts generation-only speedup closely (1.70× vs 1.68× measured); the PPD split picks 9–10, also with τ
   measured on the T4. On the M1 the fit also picks g = 8, the best tested size (1.76× predicted, 1.78× measured),
   but the PPD split picks 12 and delivers 12% less. On the T4 the curve is flat, so the methods pick anything from 7 to 128 and all deliver
-  1.84–1.95× end to end. The fit over-predicts there by 25–30%, because the calibration articles copied
-  more (60%) than the held-out ones (43%).
+  1.84–1.95× end to end. The fit over-predicts on the T4 because its calibration articles were easier (τ 2.75 vs 2.07 at g = 32), and on
+  the RTX 3060 (2.66× vs 2.03×) because its timings drifted between the two halves; on their own calibration articles
+  the fitted curves are within 4% on every device.
 * **Speedup follows copying:** per article, generation-only speedup grows steadily with the share of
   the output copied from the article, on both devices (fig. 7).
 * **Languages:** Qwen's tokenizer needs 4.7–10.1 tokens per word for Hindi/Marathi/Bengali/Tamil vs 1.3
   for English. Contrary to our hypothesis, tokens gained per pass are *higher* (the 0.5B model copies
   the article heavily, and each copied word is many tokens). On the T4 this gives **5.2–6.5× end to
   end** (Hindi 6.53×). On the CPU the 3–7× longer prompts take long to read, which guessing cannot speed
-  up, so end-to-end gains shrink to 1.41–1.88× although generation alone is 2.7–3.7× faster. The M1 reaches 1.7–2.4× end to end.
+  up, so end-to-end gains shrink to 1.41–1.88× although generation alone is 2.7–3.7× faster. The M1 reaches 1.7–2.4× and the RTX 3060 5.0–9.6× end to end.
 * **Sustained load:** over 20 minutes of continuous load the plugged-in laptop got no slower (1.45–1.51× per
   cycle of prompts). It started warm after more than an hour of benchmarks (one-token pass 155 ms against
   130 ms profiled earlier), so this does not rule out throttling. The fanless M1 stayed at 1.74–1.75× for 20 minutes.

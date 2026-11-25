@@ -260,6 +260,7 @@ def write_tex(results_root: str, out_tex: str):
     cpu = next((r for r in cpus if "i7-8550U" in r.short), cpus[0])
     gpu = next((r for r in gpus if r.short == "Tesla T4"), gpus[-1])
     m1 = next(r for r in gpus if r.kind == "mps")
+    rtx = next((r for r in gpus if "RTX" in r.short), None)
     ext = next((r for r in runs if r.kind == gpu.kind and r.short == gpu.short and r.tag == "wide-grid"), None)
     gpu_best = ext or gpu
     swept = [r for r in runs if r.sweep]
@@ -301,8 +302,14 @@ def write_tex(results_root: str, out_tex: str):
     m1_loss_max = pct(1 - wm1["largest"] / wm1["own"])
     m1_lang = {x_["lang"]: x_ for x_ in lang_by_run[m1.folder]}
     m1_ppd = m1.exp["calibration"]["choices"]["ppd_split"]
+    rtx_bg, rtx_peak = rd.best_g(rtx)
+    u_rtx = uni[rtx.folder]
+    rtx_base = [x_["mean_pass_sec"] * 1000 for x_ in rtx.exp["sweep"]["rows"] if x_["g"] == 0]
+    rtx_split = {sp: rd.aggregate([x_ for x_ in rtx.exp["sweep"]["rows"] if x_["split"] == sp]) for sp in ("calib", "eval")}
+    t4_split = {sp: rd.aggregate([x_ for x_ in gpu.exp["sweep"]["rows"] if x_["split"] == sp]) for sp in ("calib", "eval")}
+    rtx_lang = {x_["lang"]: x_ for x_ in lang_by_run[rtx.folder]}
     gpu_over = [uni[r.folder]["pred_speedup"] / uni[r.folder]["heldout_decode_speedup"] - 1
-                for r in (gpu, gpu_best)]
+                for r in (gpu, gpu_best, rtx)]
     top_g = max(gpu_best.sweep)
     top_row = gpu_best.sweep[top_g]
     gpu12 = gpu.sweep[12]["speedup"]
@@ -333,15 +340,16 @@ def write_tex(results_root: str, out_tex: str):
         f"{cpu_ratio33:.1f} times on the {cpu.short}. The CPU is therefore fastest at a draft size of {cpu_bg} "
         f"({x(cpu_peak)} by total time) and falls off beyond it, while the T4 reaches {x(gpu12)} at 12 and then "
         f"stays flat up to {top_g}: larger drafts bring it almost nothing but also cost it nothing. The integrated GPU "
-        f"of an {m1.short} laptop behaves like the CPU, peaking at {m1_bg} ({x(m1_peak)}) and falling to {x(m1_g32)} at 32. "
+        f"of an {m1.short} laptop behaves like the CPU, peaking at {m1_bg} ({x(m1_peak)}) and falling to {x(m1_g32)} at 32, "
+        f"while an {rtx.short} GPU behaves like the T4 ({x(rtx_peak)} at {rtx_bg}). "
         "A draft size "
         f"calibrated on the T4 makes the CPU {cpu_loss} slower than its own, the largest one tested {cpu_loss_max} "
         "slower, and on articles that copy little it is slower than normal decoding. UniSpec-style calibration finds "
         f"the best tested draft size on the CPU and the {m1.short} and predicts their generation speedup closely "
         f"({x(u_cpu['pred_speedup'])} against {x(u_cpu['heldout_decode_speedup'])} measured, and "
-        f"{x(u_m1['pred_speedup'])} against {x(u_m1['heldout_decode_speedup'])}); on the T4 it over-predicts by "
-        f"{pct(min(gpu_over))}–{pct(max(gpu_over))}, because the gain depends on how much the output copies its "
-        "input. Qwen's "
+        f"{x(u_m1['pred_speedup'])} against {x(u_m1['heldout_decode_speedup'])}); on the two NVIDIA GPUs it over-predicts by "
+        f"{pct(min(gpu_over))}–{pct(max(gpu_over))}, because its calibration articles differed from the held-out ones, "
+        "in content on the T4 and in timing noise on the RTX 3060. Qwen's "
         f"tokenizer splits the Indian languages into {min(ind_fert):.1f}–{max(ind_fert):.1f} tokens per word "
         f"against {en_fert:.2f} for English; this raises acceptance, giving up to "
         f"{x(max(gpu_lang[l]['e2e'] for l in ind))} end to end on the T4, but makes prompts so long that reading "
@@ -371,7 +379,7 @@ def write_tex(results_root: str, out_tex: str):
         "richer morphology among its limitations; PPD lists GPUs with limited compute "
         "among their limitations.")
     R.p("This project tests the shared rule where the papers did not: on an ordinary laptop processor, a laptop's "
-        "integrated GPU and a free cloud GPU, under sustained load, and in four Indian languages. It continues our proposal and mid-project "
+        "integrated GPU, a gaming laptop's GPU and a free cloud GPU, under sustained load, and in four Indian languages. It continues our proposal and mid-project "
         "report. At the mid-project stage, a seven-method benchmark of our decoding engine on a T4 GPU found that a "
         "1B-parameter draft model gave 1.13× while n-gram drafting gave only 1.04× on short open-domain questions, "
         "with 12% of drafted tokens accepted, because such answers contain nothing to copy. The present study "
@@ -531,7 +539,7 @@ def write_tex(results_root: str, out_tex: str):
     R.table(["Run", "Hardware", "Precision", "Articles (calib + held-out)", "Repeats", "Draft sizes", "Software"],
             dev_rows,
             "Devices and runs. Each run is one results folder; a second run on the same device under a different "
-            "setting is listed separately. CPUs use 32-bit floating point; the T4 and the Apple GPU use 16-bit. "
+            "setting is listed separately. CPUs use 32-bit floating point; all GPUs use 16-bit. "
             "The Apple M1 is in a fanless MacBook Air and shares its memory between CPU and GPU.",
             widths=[2.8, 3.3, 1.7, 2.1, 1.6, 1.5, 2.2])
     R.h2("Metrics and experiments")
@@ -637,7 +645,11 @@ def write_tex(results_root: str, out_tex: str):
         "near $\\tau$ = 2.4 while a pass costs almost the same. The "
         f"{m1.short} GPU is shaped like the CPU rather than like the T4: it peaks at $g$ = {m1_bg} and falls to {x(m1_g32)} at "
         f"$g$ = 32, where {len(m1_slow32)} of its {m1.sweep[32]['n']} articles were slower than normal decoding. Being a GPU is "
-        "therefore not enough to make large drafts free; what counts is how pass time grows.")
+        "therefore not enough to make large drafts free; what counts is how pass time grows. The "
+        f"{rtx.label} behaves like the T4 instead: its pass time is flat between 2 and 33 tokens and its speedup is still "
+        f"{x(rtx_peak)} at $g$ = {rtx_bg}. Its passes are slow for a GPU (about {sum(rtx_base) / len(rtx_base):.0f} ms, against "
+        f"{p_gpu[1]:.0f} ms on the T4) and varied from {min(rtx_base):.0f} to {max(rtx_base):.0f} ms between articles, which "
+        "suggests fixed per-pass overhead on this Windows laptop rather than GPU work; its curve is correspondingly noisy.")
     R.p(f"Averages of per-article speedups tell a misleading story here. At $g$ = {top_g} on the {gpu.short} their mean "
         f"is {x(top_row['speedup_mean'])}, but their median is {x(top_row['speedup_median'])}, because one article whose "
         f"summary copies the source word for word runs {top_row['speedup_max']:.1f}× faster. Total time, which is what "
@@ -654,14 +666,14 @@ def write_tex(results_root: str, out_tex: str):
             "Speedup on held-out articles with each run's own calibrated $g^*$ and with a $g^*$ calibrated in "
             "another run, read from the run's own sweep (interpolated between tested draft sizes; draft sizes "
             "beyond a run's tested range are omitted).", widths=[3.6, 1.5, 1.6, 5.2, 1.6, 1.3])
-    R.p(f"A mis-tuned draft size matters on both laptops and hardly at all on the T4 (Table 5, Figure 3). The CPU loses "
+    R.p(f"A mis-tuned draft size matters on the CPU and the M1, and little on the two NVIDIA GPUs (Table 5, Figure 3). The CPU loses "
         f"{cpu_loss} with the draft size calibrated on the {gpu.short} ($g$ = {cpu_foreign['g']}) and {cpu_loss_max} with "
         f"the largest size tested ($g$ = {wcpu['largest_g']}), because it pays for every extra token; the "
         f"{m1.short} loses {m1_loss} and {m1_loss_max} in the same way, and nothing with the CPU's size, because both calibrate "
         f"to $g$ = {m1_bg}. The T4 loses "
         f"{pct(min(gpu_losses))}–{pct(max(gpu_losses))} with their smaller size, since it only forgoes a little "
-        "acceptance it could have had for free. No run fell below 1.0× overall, but individual articles did on "
-        "both laptops, as noted above.")
+        "acceptance it could have had for free; the RTX 3060's differences are within its timing noise. No run fell "
+        "below 1.0× overall, but individual articles did on the CPU and the M1, as noted above.")
     R.figure("fig3_wrong_g_cost.png",
              "Cost of using the wrong draft size: held-out speedup with each run's own $g^*$ (dark) and with $g^*$ "
              "calibrated in another run (light).", width=0.9)
@@ -698,8 +710,16 @@ def write_tex(results_root: str, out_tex: str):
         "real decoding does not.")
     R.p(f"On the {gpu.short} the methods choose sizes from 7 to 128 depending "
         "on the sweep, which is what a flat curve implies: all of them deliver between 1.84× and 1.95× end to end. The fit "
-        f"over-predicts there, by {pct(min(gpu_over))}–{pct(max(gpu_over))}, because the GPU's calibration articles "
-        "copied clearly more than its held-out ones (Section 5.5). In the extended GPU run the PPD split chooses 7 or 8 "
+        f"over-predicts there because the T4's calibration articles were easier than its held-out ones: "
+        f"$\\tau$ at $g$ = 32 was {t4_split['calib'][32]['tau']:.2f} on the first and {t4_split['eval'][32]['tau']:.2f} on the second "
+        "(Section 5.5). On the RTX 3060 the fit chooses $g$ = "
+        f"{u_rtx['g_star']} and predicts {x(u_rtx['pred_speedup'])} against {x(u_rtx['heldout_decode_speedup'])} measured, for a "
+        "different reason: the content was alike, but the timings were not. Normal passes averaged "
+        f"{rtx_split['calib'][0]['mean_pass_sec'] * 1000:.1f} ms on the calibration articles and "
+        f"{rtx_split['eval'][0]['mean_pass_sec'] * 1000:.1f} ms on the held-out ones, and passes at $g$ = 32 "
+        f"{rtx_split['calib'][32]['mean_pass_sec'] * 1000:.1f} and {rtx_split['eval'][32]['mean_pass_sec'] * 1000:.1f} ms. "
+        "On their own calibration articles the fitted curves match the measurements within 4% on every device; the "
+        "errors come from how much those articles differ from the next ones. In the extended GPU run the PPD split chooses 7 or 8 "
         "because several readings of its short latency profile are 38–47 ms instead of about 28 ms, probably "
         "interference on the shared machine; on this flat curve that costs little, but it shows how sensitive a "
         "profile-only method is to noise.")
@@ -718,7 +738,7 @@ def write_tex(results_root: str, out_tex: str):
         "most of that variation (Figure 5). At $g$ = 8 the Pearson correlation between copy share and "
         "generation-only speedup is " + "; ".join(corr_sent) + ". On the CPU, English summaries that copy about 20% "
         "of their 4-token sequences run about 1.1× faster, while the one that copies 91% runs about 3.4× faster. This "
-        f"also explains the calibration results: on the laptops the calibration and held-out articles copied similarly "
+        f"also explains part of the calibration results: on the CPU and the M1 the calibration and held-out articles copied similarly "
         f"({pct(sc['calib'])} and {pct(sc['eval'])} on the CPU) and the predictions were accurate, while on the T4 they differed "
         f"({pct(sg['calib'])} and {pct(sg['eval'])}) and it was too high. For a retrieval drafter, the task decides how "
         "much can be gained and the hardware decides how large $g$ can usefully be.")
@@ -770,7 +790,8 @@ def write_tex(results_root: str, out_tex: str):
         f"{tam_g['prefill']:.2f} s on the T4. The {m1.short} lies in between: whole requests became "
         f"{x(min(m1_lang[l]['e2e'] for l in ind))}–{x(max(m1_lang[l]['e2e'] for l in ind))} faster at $g$ = {m1_lang['tamil']['g']}, with "
         f"{m1_lang['tamil']['prefill']:.1f} s of a {m1_lang['tamil']['latency']:.1f} s Tamil request spent reading. "
-        "The draft sizes differ between devices, so these rows show each device at its own setting. Fine-grained tokenization thus helps acceptance and hurts prefill, and "
+        f"The {rtx.label} reaches {x(min(rtx_lang[l]['e2e'] for l in ind))}–{x(max(rtx_lang[l]['e2e'] for l in ind))} at $g$ = "
+        f"{rtx_lang['tamil']['g']}. The draft sizes differ between devices, so these rows show each device at its own setting. Fine-grained tokenization thus helps acceptance and hurts prefill, and "
         "the hardware decides which effect dominates.")
     R.p("The model's summaries in these languages are of low quality and heavily extractive. Decoding is lossless, "
         "so this does not affect the speed comparison, but a larger model that paraphrases more would likely accept "
@@ -819,12 +840,12 @@ def write_tex(results_root: str, out_tex: str):
     R.p("<b>The draft size matters most where pass time grows.</b> UniSpec observes smaller optimal draft sizes on "
         "consumer GPUs than on data-centre GPUs. The laptop CPU extends that trend: every verified token costs time, the "
         f"optimum is small ($g$ = {cpu_bg}), and the largest size tested loses {cpu_loss_max} and makes "
-        "individual requests slower than no speculation. The M1's integrated GPU behaves the same way. On the T4 the choice hardly matters above about 12, because a "
+        "individual requests slower than no speculation. The M1's integrated GPU behaves the same way. On the T4 and the RTX 3060 the choice hardly matters above about 12, because a "
         "0.5B model leaves it memory-bound and acceptance has already saturated; with UniSpec's 8B–14B models "
         "verification would cost more and a sharper optimum is likely.")
-    R.p("<b>Calibration works when its inputs are representative.</b> On both laptops the fit chose the best tested size and "
-        "predicted the speedup closely. On the T4 it over-predicted, because its calibration articles copied "
-        "more than the held-out ones. A deployment should calibrate on inputs typical of its own workload. How results "
+    R.p("<b>Calibration works when its inputs are representative.</b> On the CPU and the M1 the fit chose the best tested size "
+        "and predicted the speedup closely. On the T4 it over-predicted because its calibration articles were easier, and on "
+        "the RTX 3060 because its timings drifted between the two halves. A deployment should calibrate on inputs typical of its own workload. How results "
         "are averaged matters as much: means of per-article ratios were dominated by one article and would have "
         "suggested that the GPU keeps improving up to the largest draft size.")
     R.p("<b>Profile-only calibration needs repeated measurements on shared hardware.</b> The PPD split rests on a single "
@@ -850,7 +871,7 @@ def write_tex(results_root: str, out_tex: str):
         "<b>Timing noise.</b> Laptop and shared-GPU timings are noisier than dedicated servers. Paired back-to-back runs, "
         "held-out articles and single-session comparisons reduce this, but differences below about 5% should not be "
         "over-interpreted.",
-        "<b>Small samples.</b> The sweeps on the two laptops use 12 English articles and one run each, their language studies five "
+        "<b>Small samples.</b> The sweeps on the three laptops use 12 English articles and one run each, their language studies five "
         "articles per language; a single unusual article can move an average.",
         "<b>Indian-language quality.</b> The small model copies heavily in these languages; acceptance is likely lower "
         "with stronger models.",
@@ -863,8 +884,9 @@ def write_tex(results_root: str, out_tex: str):
         f"the choice matters: the best tested size is {cpu_bg} ({x(cpu_peak)}), a GPU's setting costs {cpu_loss} and the "
         f"largest tested size {cpu_loss_max}, and individual requests can become slower than normal decoding. The integrated GPU "
         f"of an {m1.short} laptop follows the same pattern (best at {m1_bg}, {x(m1_peak)}). On a free "
-        f"cloud GPU the curve is flat beyond about 12 ({x(gpu12)} to {x(gpu_peak)}), so a wrong choice costs little. "
-        "UniSpec-style calibration finds the best tested size on both laptops and predicts the speedup closely when "
+        f"cloud GPU the curve is flat beyond about 12 ({x(gpu12)} to {x(gpu_peak)}), and an {rtx.short} GPU behaves the same "
+        "way, so a wrong choice costs little there. "
+        "UniSpec-style calibration finds the best tested size on the CPU and the M1 and predicts the speedup closely when "
         "calibration inputs resemble the real ones. In Indian languages, fine-grained tokenization raises acceptance, up to "
         f"{x(max(gpu_lang[l]['e2e'] for l in ind))} end to end on the GPU, but lengthens prompts so much that on a CPU "
         f"reading them limits the gain to {x(min(cpu_lang[l]['e2e'] for l in ind))}–"

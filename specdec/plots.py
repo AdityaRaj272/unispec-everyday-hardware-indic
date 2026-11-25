@@ -53,7 +53,8 @@ def _load(results_root: str) -> Dict[str, Dict[str, Dict]]:
 def _label(dev: str, exp: Dict) -> str:
     info = next(iter(exp.values()))["device"]
     hw = f"{info['cpu']} GPU" if info["device"] == "mps" else (info.get("gpu") or info["cpu"])
-    hw = hw.replace("(R)", "").replace("(TM)", "").replace(" CPU", "").split("@")[0].strip()
+    hw = hw.replace("(R)", "").replace("(TM)", "").replace(" CPU", "").replace("NVIDIA GeForce ", "")
+    hw = hw.replace(" Laptop GPU", " laptop").split("@")[0].strip()
     tag = dev.split("__")[1] if "__" in dev else ""
     return f"{hw} ({info['dtype']})" + (f" [{tag}]" if tag else "")
 

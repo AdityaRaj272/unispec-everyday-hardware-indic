@@ -49,7 +49,7 @@ def _hardware_name(info: Dict) -> str:
         return " ".join(n.split("@")[0].split())
     if info["device"] == "mps":
         return info["cpu"]                       # e.g. "Apple M1"
-    return info.get("gpu", "GPU")
+    return info.get("gpu", "GPU").replace("NVIDIA GeForce ", "").replace(" GPU", "")
 
 
 def load_runs(results_root: str) -> List[Run]:
