@@ -48,7 +48,7 @@ def _hardware_name(info: Dict) -> str:
         n = info["cpu"].replace("(R)", "").replace("(TM)", "").replace(" CPU", "")
         return " ".join(n.split("@")[0].split())
     if info["device"] == "mps":
-        return "Apple Silicon"
+        return info["cpu"]                       # e.g. "Apple M1"
     return info.get("gpu", "GPU")
 
 
@@ -160,6 +160,8 @@ def thermal_cycles(run: Run):
     r = th["rounds"]
     n = len({x["prompt_id"] for x in r})
     cyc = [r[i:i + n] for i in range(0, len(r) - n + 1, n)]
+    if len(cyc) > 6:                             # fast devices: merge cycles into five blocks
+        cyc = [sum((cyc[i] for i in idx), []) for idx in np.array_split(range(len(cyc)), 5)]
     return th["g_star"], [dict(t0=c[0]["t_min"], t1=c[-1]["t_min"],
                                p1=float(np.median([x["pass_1_sec"] for x in c])) * 1000,
                                pg=float(np.median([x["pass_g_sec"] for x in c])) * 1000,

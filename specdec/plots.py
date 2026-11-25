@@ -52,7 +52,7 @@ def _load(results_root: str) -> Dict[str, Dict[str, Dict]]:
 
 def _label(dev: str, exp: Dict) -> str:
     info = next(iter(exp.values()))["device"]
-    hw = info.get("gpu") or info["cpu"]
+    hw = f"{info['cpu']} GPU" if info["device"] == "mps" else (info.get("gpu") or info["cpu"])
     hw = hw.replace("(R)", "").replace("(TM)", "").replace(" CPU", "").split("@")[0].strip()
     tag = dev.split("__")[1] if "__" in dev else ""
     return f"{hw} ({info['dtype']})" + (f" [{tag}]" if tag else "")
@@ -103,7 +103,8 @@ def fig_fingerprint(data, colors, labels, out_dir):
     axes[1].axhline(1, color=INK2, lw=1, ls="--")
     axes[1].set(title="Same, relative to a 1-token pass", xlabel="tokens processed in the pass (1 + draft size g)",
                 ylabel="× cost of a 1-token pass")
-    _legend(axes[1], loc="upper left")
+    h, l = axes[1].get_legend_handles_labels()
+    fig.legend(h, l, loc="lower center", ncol=min(len(l), 4), fontsize=9, bbox_to_anchor=(0.5, -0.07))
     fig.suptitle("Hardware fingerprint: what checking extra guessed tokens costs (context 1024 tokens)",
                  color=INK, fontsize=11, x=0.01, ha="left")
     fig.tight_layout()
@@ -233,12 +234,19 @@ def fig_calibration(data, colors, labels, out_dir):
     devs = [d for d in data if "calibration" in data[d]]
     if not devs:
         return None
-    fig, axes = plt.subplots(1, len(devs), figsize=(4.6 * len(devs), 4), squeeze=False)
-    for ax, d in zip(axes[0], devs):
+    cols = len(devs) if len(devs) <= 3 else 2
+    nrows = -(-len(devs) // cols)
+    fig, axes = plt.subplots(nrows, cols, figsize=(5.6 * cols, 4 * nrows), squeeze=False)
+    for ax in axes.ravel()[len(devs):]:
+        ax.set_visible(False)
+    for ax, d in zip(axes.ravel(), devs):
         ch = data[d]["calibration"]["choices"]
-        names = list(ch)
+        # "tau from the extended sweep" repeats "tau from the same device"; leave it out
+        names = [n for n in ch if "__" not in n]
         short = [n.replace("ppd_split_tau_from:", "PPD split\n(τ from ").replace("unispec", "UniSpec fit")
                  .replace("ppd_split", "PPD split").replace("grid", "grid search") for n in names]
+        for dev, lab in labels.items():
+            short = [s.replace(dev, lab.split(" (")[0]) for s in short]
         short = [s + ")" if "(τ from" in s else s for s in short]
         y = np.arange(len(names))
         pred = [ch[n]["pred_speedup"] for n in names]
@@ -256,7 +264,7 @@ def fig_calibration(data, colors, labels, out_dir):
         ax.set(title=labels[d], xlabel="speedup (×)")
         ax.grid(axis="y", visible=False)
     h, l = axes[0][0].get_legend_handles_labels()
-    fig.legend(h, l, loc="lower center", ncol=2, bbox_to_anchor=(0.5, -0.06))
+    fig.legend(h, l, loc="lower center", ncol=2, bbox_to_anchor=(0.5, -0.04))
     fig.suptitle("Three ways to choose g: predicted vs measured generation speedup on unseen articles",
                  color=INK, fontsize=11, x=0.01, ha="left")
     fig.tight_layout()
@@ -302,7 +310,7 @@ def fig_language(data, colors, labels, out_dir):
                  color=INK, fontsize=11, x=0.01, ha="left")
     fig.tight_layout()
     h, l = axes[2].get_legend_handles_labels()
-    fig.legend(h, l, loc="lower right", ncol=2, fontsize=8, bbox_to_anchor=(0.99, -0.08))
+    fig.legend(h, l, loc="lower center", ncol=3, fontsize=8, bbox_to_anchor=(0.5, -0.1))
     return _save(fig, out_dir, "fig5_language.png")
 
 
@@ -330,10 +338,11 @@ def fig_thermal(data, colors, labels, out_dir):
                 ylabel="milliseconds")
     axes[0].set_ylim(0, None)
     axes[1].axhline(1, color=INK2, lw=1, ls="--")
-    axes[1].set(title="Speedup at the calibrated g*, averaged per cycle of prompts",
+    axes[1].set(title="Speedup, averaged per cycle of prompts",
                 xlabel="minutes of continuous load", ylabel="speedup (×)")
     axes[1].set_ylim(0.8, None)
-    _legend(axes[0], loc="lower right", fontsize=8)
+    h, l = axes[0].get_legend_handles_labels()
+    fig.legend(h, l, loc="lower center", ncol=2, fontsize=8, bbox_to_anchor=(0.5, -0.12))
     _legend(axes[1], loc="lower left", fontsize=8)
     fig.tight_layout()
     return _save(fig, out_dir, "fig6_thermal.png")
@@ -346,8 +355,12 @@ def fig_copy(data, colors, labels, out_dir, g=8):
     devs = [d for d in data if "sweep" in data[d] or "language" in data[d]]
     if not devs:
         return None
-    fig, axes = plt.subplots(1, len(devs), figsize=(5.6 * len(devs), 4.4), squeeze=False)
-    for ax, d in zip(axes[0], devs):
+    cols = len(devs) if len(devs) <= 3 else 2
+    nrows = -(-len(devs) // cols)
+    fig, axes = plt.subplots(nrows, cols, figsize=(5.6 * cols, 4.2 * nrows), squeeze=False)
+    for ax in axes.ravel()[len(devs):]:
+        ax.set_visible(False)
+    for ax, d in zip(axes.ravel(), devs):
         rows = data[d].get("sweep", {}).get("rows", []) + data[d].get("language", {}).get("rows", [])
         seen, pts = set(), []
         for r in rows:

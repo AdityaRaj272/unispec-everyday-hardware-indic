@@ -1,0 +1,162 @@
+{
+ "device": {
+  "device": "mps",
+  "dtype": "float16",
+  "os": "Darwin 27.0.0",
+  "cpu": "Apple M1",
+  "cpu_cores": 8,
+  "torch_threads": 4,
+  "torch": "2.15.0",
+  "transformers": "5.24.1",
+  "python": "3.12.3",
+  "ram_gb": 8.0,
+  "physical_cores": 8,
+  "on_battery": false,
+  "gpu": "Apple Silicon (MPS)",
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "preset": "cpu"
+ },
+ "config": {
+  "max_new": 128,
+  "n_calib": 6,
+  "n_eval": 6,
+  "repeats": 1,
+  "grid": [
+   1,
+   2,
+   3,
+   4,
+   6,
+   8,
+   12,
+   16,
+   24,
+   32
+  ],
+  "profile_ctx": [
+   512,
+   1024,
+   2048
+  ],
+  "profile_n": [
+   1,
+   2,
+   3,
+   4,
+   5,
+   7,
+   9,
+   13,
+   17,
+   25,
+   33
+  ],
+  "profile_reps": 7,
+  "n_correct": 4,
+  "lang_n": 5,
+  "lang_grid": [
+   4,
+   8
+  ],
+  "thermal_min": 20.0
+ },
+ "exact_match_rate": 0.9166666666666666,
+ "runs": [
+  {
+   "prompt_id": "en-00",
+   "g": 2,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-00",
+   "g": 8,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-00",
+   "g": 32,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-01",
+   "g": 2,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-01",
+   "g": 8,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-01",
+   "g": 32,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-02",
+   "g": 2,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-02",
+   "g": 8,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-02",
+   "g": 32,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 128,
+   "matching_prefix": 128
+  },
+  {
+   "prompt_id": "en-03",
+   "g": 2,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 102,
+   "matching_prefix": 102
+  },
+  {
+   "prompt_id": "en-03",
+   "g": 8,
+   "exact_match": 1,
+   "first_diff_at": null,
+   "n_tokens": 102,
+   "matching_prefix": 102
+  },
+  {
+   "prompt_id": "en-03",
+   "g": 32,
+   "exact_match": 0,
+   "first_diff_at": 11,
+   "n_tokens": 102,
+   "matching_prefix": 12
+  }
+ ]
+}
